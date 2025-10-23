@@ -1,10 +1,10 @@
 # LLM Code Agent 提示词文档集
 
-这是一套完整的提示词文档，用于指导 LLM Code Agent 实现 **Open WebUI + Claude/GLM API + 动态知识加载系统**。
+这是一套完整的提示词文档，用于指导 LLM Code Agent 实现 **Svelte 前端 + FastAPI 后端 + Claude/GLM API + 动态知识加载系统**。
 
 ## 📋 项目概述
 
-**目标**：搭建一个基于 Open WebUI 的专业知识库系统，通过上传专业领域文档生成 Markdown 知识库，并实现类似 Claude Skill 的动态知识加载机制。
+**目标**：搭建一个基于 Svelte 的专业知识库对话系统，通过上传专业领域文档生成 Markdown 知识库，并实现类似 Claude Skill 的动态知识加载机制。
 
 **核心特性**：
 - ✅ 支持 PDF/Word/Excel/PPT 等多种文档格式
@@ -14,7 +14,7 @@
 - ✅ Claude 辅助的智能 Skill 路由
 - ✅ 轻量级索引（无需向量数据库）
 - ✅ 成本优化策略（缓存、智能路由）
-- ✅ 完整的用户界面和工作流
+- ✅ 自定义 Svelte 前端界面和工作流
 
 ## 📂 文档结构
 
@@ -53,7 +53,7 @@ docs/llm-agent-prompts/
 建议按照以下顺序完成开发：
 
 #### **阶段1：环境搭建（1-2天）**
-1. [01 - Docker 部署 Open WebUI](./phase-01-environment/01-docker-deploy-openwebui.md)
+1. [01 - 搭建 Svelte 前端环境](./phase-01-environment/01-setup-svelte-frontend.md)
 2. [02 - 配置 Claude API](./phase-01-environment/02-configure-claude-api.md)
 3. [03 - 配置 GLM API](./phase-01-environment/03-configure-glm-api.md)
 4. [04 - 安装 Python 依赖](./phase-01-environment/04-setup-python-dependencies.md)
@@ -73,12 +73,12 @@ docs/llm-agent-prompts/
 #### **阶段4：动态加载引擎（3-4天）**
 13. [13 - 用户意图识别模块](./phase-04-dynamic-loading/13-intent-recognition-module.md)
 14. [14 - 知识检索引擎](./phase-04-dynamic-loading/14-knowledge-retrieval-engine.md)
-15. [15 - Filter Pipeline 集成](./phase-04-dynamic-loading/15-filter-pipeline-integration.md)
+15. [15 - FastAPI 聊天接口集成](./phase-04-dynamic-loading/15-fastapi-chat-integration.md)
 
 #### **阶段5：测试优化（2-3天）**
 16. [16 - 文档处理功能测试](./phase-05-testing-optimization/16-document-processing-tests.md)
 17. [17 - API 成本优化策略](./phase-05-testing-optimization/17-cost-optimization-strategies.md)
-18. [18 - 用户界面和工作流优化](./phase-05-testing-optimization/18-ui-workflow-optimization.md)
+18. [18 - Svelte 前端开发和工作流](./phase-05-testing-optimization/18-svelte-frontend-development.md)
 
 ### 2. 每个文档包含什么？
 
@@ -111,9 +111,16 @@ docs/llm-agent-prompts/
 
 ## 🔧 技术栈
 
-### 核心框架
-- **Open WebUI**: AI 对话平台
-- **FastAPI**: 后端 API 服务
+### 前端框架
+- **SvelteKit**: 现代化前端框架
+- **TypeScript**: 类型安全
+- **Tailwind CSS**: 样式框架
+- **Vite**: 构建工具
+
+### 后端框架
+- **FastAPI**: 高性能后端 API 服务
+- **Python 3.11+**: 后端语言
+- **WebSocket**: 实时对话流式传输
 
 ### AI API
 - **Anthropic Claude**: Vision API（英文文档优势） + Skill 路由
@@ -175,7 +182,7 @@ docs/llm-agent-prompts/
 - ✅ 文档上传即处理，无需等待
 - ✅ 对话中自动注入相关知识
 - ✅ 完整上下文，不切断语义
-- ✅ 完整的 Web 界面，无需命令行
+- ✅ 自定义 Svelte Web 界面，交互流畅
 
 ## 🎯 里程碑
 
@@ -201,12 +208,16 @@ docs/llm-agent-prompts/
 cd /Users/woohelps/CascadeProjects/blockme
 
 # 2. 阅读第一个文档
-cat docs/llm-agent-prompts/phase-01-environment/01-docker-deploy-openwebui.md
+cat docs/llm-agent-prompts/phase-01-environment/01-setup-svelte-frontend.md
 
 # 3. 开始实施
 # 按照文档指导逐步完成每个任务
 
-# 4. 测试验证
+# 4. 启动前端和后端
+cd frontend && npm run dev  # 启动 Svelte 前端 (http://localhost:5173)
+cd backend && uv run uvicorn main:app --reload  # 启动 FastAPI 后端 (http://localhost:8000)
+
+# 5. 测试验证
 # 每完成一个任务，运行对应的测试确保质量
 ```
 
@@ -226,11 +237,11 @@ cat docs/llm-agent-prompts/phase-01-environment/01-docker-deploy-openwebui.md
 ## 🙏 致谢
 
 感谢以下开源项目和技术：
-- Open WebUI
+- SvelteKit
+- FastAPI
 - Anthropic Claude
 - 智谱 GLM
-- ChromaDB
-- Sentence Transformers
+- Tailwind CSS
 
 ---
 

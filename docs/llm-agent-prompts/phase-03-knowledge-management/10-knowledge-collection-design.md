@@ -50,11 +50,11 @@ knowledge_base/
 
 ### 2. 定义 Skill 元数据结构
 
-每个 Skill 使用 YAML front matter 定义元数据：
+每个 Skill 使用 YAML front matter 定义元数据（**必须包含 `id` 字段以兼容 `mvp/skill_loader.py`**）：
 
 ```yaml
 ---
-skill_id: sk-personal-tax
+id: sk-personal-tax
 title: 萨斯喀彻温省个人所得税指南 (2024)
 version: "1.0"
 last_updated: "2024-01-01"
@@ -103,6 +103,8 @@ estimated_tokens: 6500
 ---
 ```
 
+> 与现有 `mvp/skill_loader.py` 兼容：Front matter 内的 `id` 会映射为运行期对象的 `skill_id`，请保持唯一并使用短横线命名；如需兼容旧数据，可在脚本中保留对 `skill_id` 键的回退逻辑。
+
 ### 3. 实现 Skill 管理器
 
 开发轻量级 Skill 管理系统：
@@ -111,12 +113,12 @@ estimated_tokens: 6500
 - 提供 Skill 查询和加载接口
 - 无需向量化或复杂索引
 
-### 4. 集成 Open WebUI
+### 4. 集成 FastAPI + Svelte 工作流
 
-将 Skill 系统注册到 Open WebUI：
-- 作为 Function 或 Pipeline 集成
-- 提供 Skill 管理界面
-- 支持 Skill 的增删改查
+- 通过 FastAPI 暴露 `skills` 查询/管理接口（供前端、测试、Automations 使用）
+- 在 Svelte 前端创建对应的管理视图：列表、搜索、相关 Skill 预览
+- CLI/MVP 仍可直接调用 `SkillManager`，保持与后端一致的路径和元数据格式
+- 后续当 FastAPI 聊天接口（任务15）需要加载 Skill 时，直接依赖该管理器，无需额外适配
 
 ## 关键代码提示
 
@@ -156,7 +158,7 @@ domains:
 # knowledge_base/skills/provincial/saskatchewan-personal-tax.md
 
 ---
-skill_id: sk-personal-tax
+id: sk-personal-tax
 title: 萨斯喀彻温省个人所得税指南 (2024)
 version: "1.0"
 last_updated: "2024-01-01"
@@ -249,7 +251,7 @@ from dataclasses import dataclass, field
 @dataclass
 class SkillMetadata:
     """Skill 元数据"""
-    skill_id: str
+    skill_id: str  # 运行期使用的 id，来自 YAML 中的 `id`
     title: str
     domain: str
     topics: List[str] = field(default_factory=list)
@@ -297,7 +299,11 @@ class SkillManager:
             metadata = self._parse_skill_metadata(md_file)
 
             if metadata:
-                skill_id = metadata.get("skill_id", md_file.stem)
+                skill_id = (
+                    metadata.get("id")
+                    or metadata.get("skill_id")
+                    or md_file.stem
+                )
                 self.skills_index[skill_id] = {
                     "path": str(md_file.relative_to(self.skills_dir)),
                     "metadata": metadata

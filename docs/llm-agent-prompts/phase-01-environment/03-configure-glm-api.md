@@ -2,231 +2,146 @@
 
 ## 任务目标
 
-在 Open WebUI 中配置智谱 AI 的 GLM API，启用 GLM-4 系列模型（特别是 GLM-4V 视觉模型）用于中文文档处理。GLM-4V 在中文识别准确率达到 99.3%，且提供免费的 GLM-4V-Flash API，非常适合处理中文专业文档。
+为 BlockMe 的文档理解与回答模块准备智谱 GLM API，特别是 `glm-4-flash`（免费）与 `glm-4-vision-preview`（多模态）。本任务完成后：
+- `mvp/chat_service.py` 可直接使用本地配置调用 GLM 生成回答
+- 后续 FastAPI 服务能够共用同一密钥
+- 多模态/Markdown 生成流水线具备中文文档处理能力
 
 ## 技术要求
 
-**必需资源：**
-- 智谱 AI API Key（从 https://open.bigmodel.cn 获取）
-- Open WebUI 已部署并运行（任务01完成）
-- 网络能访问 `open.bigmodel.cn`
-
-**推荐模型：**
-- `glm-4v-flash`：免费视觉模型，适合中文文档处理
-- `glm-4v-plus`：高级视觉模型，准确率更高
-- `glm-4-plus`：纯文本模型，中文对话优秀
-- `glm-4-flash`：快速文本模型，成本低
+- 注册并完成实名认证的智谱 AI 账户（https://open.bigmodel.cn/）
+- 通过控制台创建 API Key，具备调用 GLM-4/GLM-4V 权限
+- Python 3.11+、`uv`，以及 `zhipuai` SDK（已在 `mvp/pyproject.toml` 中列出）
+- 网络可访问 `https://open.bigmodel.cn`
 
 ## 实现步骤
 
-### 1. 获取 API Key
+### 1. 获取 GLM API Key
 
-注册智谱 AI 开放平台：
-1. 访问 https://open.bigmodel.cn/usercenter/apikeys
-2. 点击 "创建 API Key"
-3. 命名密钥（如 "openwebui-prod"）
-4. 复制并保存密钥（格式：`xxxx.xxxxxxxxxxxxxxxx`）
+1. 登录 https://open.bigmodel.cn/console/
+2. 访问 **API Key 管理**，点击 **创建 API Key**
+3. 记录密钥（格式 `glm-...` 或 `fU0l...`），后续写入 `.env`
+4. 若计划调用付费模型（如 `glm-4-plus`），务必完成企业认证并充值
 
-**福利提示：**
-- 新用户赠送免费 Token 额度
-- GLM-4V-Flash 完全免费使用
-- 实名认证后可获得更高配额
+### 2. 将密钥写入 `.env`
 
-### 2. 配置多模型支持
-
-由于需要同时使用 Claude 和 GLM，需要配置多个 API 端点：
-
-编辑 `docker-compose.yml`：
-
-```yaml
-environment:
-  # Claude API
-  - OPENAI_API_BASE_URLS=https://api.anthropic.com/v1,https://open.bigmodel.cn/api/paas/v4
-  - OPENAI_API_KEYS=${CLAUDE_API_KEY},${GLM_API_KEY}
-```
-
-**注意逗号分隔的多端点配置格式。**
-
-### 3. 通过管理界面配置（推荐方式）
-
-登录 Open WebUI 管理员账号：
-
-1. **Admin Panel** → **Settings** → **Connections**
-2. 在 **OpenAI API** 下点击 "Add Connection"
-3. 填写 GLM 配置：
-   - **Name**: `GLM API`
-   - **Base URL**: `https://open.bigmodel.cn/api/paas/v4`
-   - **API Key**: 你的智谱 API Key
-4. 保存配置
-
-### 4. 添加 GLM 模型
-
-**Admin Panel** → **Models** → **Add Model**：
-
-为文本模型配置：
-- **Model ID**: `glm-4-plus`
-- **Display Name**: `GLM-4 Plus（中文优化）`
-- **Context Length**: 128000
-- **Max Tokens**: 4096
-
-为视觉模型配置：
-- **Model ID**: `glm-4v-flash`
-- **Display Name**: `GLM-4V Flash（免费中文视觉）`
-- **Supports Vision**: ✅ 勾选
-- **Max Image Size**: 20MB
-- **Context Length**: 8000
-
-### 5. 配置模型路由策略
-
-在后续的 Filter Pipeline 中，可以根据任务类型自动选择模型：
-
-- **中文文档** → GLM-4V-Flash（免费）
-- **英文文档** → Claude Vision（准确）
-- **复杂表格/公式** → Claude Opus（最强）
-- **日常对话** → GLM-4-Flash（快速）
-
-## 关键代码提示
-
-**完整 .env 文件示例：**
+沿用任务02中的 `.env` 文件：
 
 ```bash
-# Open WebUI 基础配置
-WEBUI_SECRET_KEY=your-random-secret-key-here
+cat <<'EOF' >> .env
+GLM_API_KEY=your-glm-key
+EOF
 
-# Claude API
-CLAUDE_API_KEY=sk-ant-api03-xxxxx
-
-# GLM API
-GLM_API_KEY=xxxx.xxxxxxxxxxxxxxxx
-
-# 多模型配置
-OPENAI_API_BASE_URLS=https://api.anthropic.com/v1,https://open.bigmodel.cn/api/paas/v4
-OPENAI_API_KEYS=${CLAUDE_API_KEY},${GLM_API_KEY}
+# 同步到 mvp/.env
+cp .env mvp/.env
 ```
 
-**Python 测试脚本（验证 GLM API）：**
+（若 `.env` 已存在 `GLM_API_KEY` 行，请直接编辑。）
 
-```python
+### 3. 让 `mvp/` 组件读取密钥
+
+- `mvp/chat_service.py` 会在初始化阶段读取 `os.getenv("GLM_API_KEY")`
+- 确保运行 CLI 前已经 `source .venv/bin/activate && export $(grep -v '^#' ../.env | xargs)`
+- 后续 FastAPI 服务也将复用同名变量，保持一致
+
+### 4. 进行 SDK 连通性测试
+
+```bash
+python - <<'PY'
+import os
 from zhipuai import ZhipuAI
 
-client = ZhipuAI(api_key="xxxx.xxxxxxxxxxxxxxxx")
-
-# 测试文本模型
-response = client.chat.completions.create(
-    model="glm-4-plus",
-    messages=[
-        {"role": "user", "content": "你好，请用中文介绍你自己"}
-    ],
+client = ZhipuAI(api_key=os.environ.get("GLM_API_KEY"))
+resp = client.chat.completions.create(
+    model="glm-4-flash",
+    messages=[{"role": "user", "content": "测试 BlockMe 开发环境"}],
+    temperature=0.2,
+    max_tokens=512,
 )
-print(response.choices[0].message.content)
+print(resp.choices[0].message.content)
+PY
+```
 
-# 测试视觉模型
-vision_response = client.chat.completions.create(
-    model="glm-4v-flash",
-    messages=[
+如返回文本表示配置成功；若失败请检查：
+- 环境变量是否导出
+- SDK 版本是否与 `pyproject.toml` 一致
+- 控制台是否已为该 Key 分配调用权限
+
+### 5. 预留多模态（Vision）配置
+
+为文档处理/Markdown 流水线准备图像接口：
+
+```python
+vision_resp = client.response.create(
+    model="glm-4-vision-preview",
+    input=[
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "这张图片里有什么内容？"},
-                {"type": "image_url", "image_url": {"url": "图片URL或base64"}}
+                {"type": "text", "text": "提取截图中的表格内容"},
+                {"type": "image_url", "url": "https://example.com/page.png"}
             ]
         }
-    ],
+    ]
 )
-print(vision_response.choices[0].message.content)
 ```
 
-**智谱 API SDK 安装：**
+该片段可嵌入任务07/08的文档转换实现中，密钥沿用 `GLM_API_KEY`。
+
+## 关键代码提示
+
+### `.env`
 
 ```bash
-pip install zhipuai
+ANTHROPIC_API_KEY=sk-ant-xxx
+GLM_API_KEY=glm-xxx
+```
+
+### `chat_service.py`（节选）
+
+```python
+self.api_key = api_key or os.getenv("GLM_API_KEY")
+self.client = ZhipuAI(api_key=self.api_key)
+self.model = "glm-4-flash"  # 可根据成本切换
+```
+
+### FastAPI 统一配置（示例）
+
+```python
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    anthropic_api_key: str = ""
+    glm_api_key: str = ""
+
+settings = Settings()
+chat_client = ZhipuAI(api_key=settings.glm_api_key)
 ```
 
 ## 测试验证
 
-### 1. 文本对话测试
-
-在 Open WebUI 中：
-1. 选择 "GLM-4 Plus" 模型
-2. 发送中文问题："请解释一下量子纠缠现象"
-3. 验证回复质量和速度
-
-### 2. 中文视觉识别测试
-
-上传一张中文文档截图：
-1. 切换到 "GLM-4V Flash" 模型
-2. 上传图片（如发票、合同扫描件）
-3. 询问："请提取图片中的所有文字并整理成 Markdown"
-4. 验证识别准确率
-
-### 3. 成本对比测试
-
-使用同一张图片分别测试：
-- GLM-4V-Flash（免费）
-- Claude Vision（付费）
-
-比较：
-- 识别准确率
-- 处理速度
-- 成本差异
-
-### 4. API 配额查看
-
-访问智谱 AI 控制台：
-- 查看 Token 使用量
-- 确认剩余额度
-- 查看调用日志
+1. **命令行自检**：运行第 4 步脚本
+2. **MVP 回答**：`python mvp/chat_service.py`，提问 “PST 税率是多少？”
+3. **端到端**：`python mvp/main.py`，确保在加载 Skills 后 GLM 输出正常
+4. **Vision 试跑**：在任务07/08完成后，用同一 Key 调用图像接口，确认权限一致
 
 ## 注意事项
 
-**免费额度优化：**
-1. **GLM-4V-Flash 完全免费**，优先用于中文文档
-2. 复杂任务才切换到付费模型
-3. 实现自动降级：GLM 失败时回退到 Claude
-
-**API 限制：**
-- 免费用户 QPM（每分钟请求数）较低
-- 单张图片建议 < 10MB
-- 超长文档需分页处理
-
-**中文优化建议：**
-1. GLM 模型对中文理解更深，提示词用中文效果更好
-2. 中文文档、中文对话优先使用 GLM
-3. 英文学术论文使用 Claude 更准确
-
-**模型选择策略：**
-
-| 任务类型 | 推荐模型 | 原因 |
-|---------|---------|------|
-| 中文发票/合同 | GLM-4V-Flash | 免费 + 中文准确 |
-| 英文 PDF | Claude Vision | 英文理解好 |
-| 复杂图表 | GLM-4V-Plus | 图表识别强 |
-| 日常聊天 | GLM-4-Flash | 快速且免费 |
-
-**网络配置：**
-- 智谱 API 国内访问稳定，无需代理
-- 响应速度通常快于国外 API
-- 建议配置超时时间为 30 秒
-
-**错误处理：**
-常见错误码：
-- `1301`：API Key 无效
-- `1302`：余额不足
-- `1303`：速率限制
-
-建议在 Pipeline 中实现重试和降级逻辑。
-
-**版本兼容性：**
-- 智谱 API 遵循 OpenAI 兼容格式
-- 可直接用 OpenAI SDK 调用（设置 base_url）
-- 部分高级功能可能需要专用 SDK
+- **速率与配额**：免费 Key 对 RPM 有限制；批量调用时请实现重试/排队
+- **模型选择**：
+  - `glm-4-flash`：默认、免费、延迟低
+  - `glm-4-plus`：推理更强，适合复杂问题
+  - `glm-4-vision-preview`：多模态提取
+- **网络与代理**：如需代理，设置 `ZHIPUAI_API_BASE` 或通过系统代理变量
+- **安全**：GLM Key 同样不要提交到 Git；CI 使用密钥管理服务
+- **成本控制**：大批量处理前，可优先使用 Flash 模型验证，满足质量后再切换到付费模型
 
 ## 依赖关系
 
 **前置任务：**
-- 任务01：Docker 部署 Open WebUI
-- 任务02：配置 Claude API（可选，但建议一起配置）
+- 任务02：配置 Claude API（复用同一 `.env` 管理方式）
 
 **后置任务：**
-- 任务08：GLM-4V API 集成（文档处理 Pipeline）
-- 任务13：意图识别模块（智能路由到 GLM 或 Claude）
+- 任务07/08：Vision 集成（读取同一 Key）
+- 任务14：Skill 引擎（GLM 回答）
+- 任务15：FastAPI 聊天接口（统一注入 GLM 客户端）

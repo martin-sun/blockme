@@ -2,223 +2,162 @@
 
 ## 任务目标
 
-在 Open WebUI 中配置 Anthropic Claude API，使系统能够调用 Claude 3.5 Sonnet 等模型进行对话和文档处理。重点支持 Claude 的视觉能力（Vision API），用于后续的文档转 Markdown 功能。
+为整个 BlockMe 项目（现有 `mvp/` CLI、即将上线的 FastAPI 服务、以及 Svelte 前端调试接口）准备 Anthropic Claude API 的访问能力。目标是在本地/CI 环境中安全地管理 `ANTHROPIC_API_KEY`，并验证 Claude Haiku/Sonnet 可用于 Skill 路由、文档理解和后续多模态处理。
 
 ## 技术要求
 
-**必需资源：**
-- Anthropic API Key（从 https://console.anthropic.com 获取）
-- Open WebUI 已部署并运行（任务01完成）
-- 网络能访问 `api.anthropic.com`
+- Anthropic 账户与有效的 API Key（https://console.anthropic.com）
+- Python 3.11+，`uv` 或其他依赖管理工具
+- 能访问 `https://api.anthropic.com` 的网络（如需可配置代理）
+- `.env` 管理或密钥托管方案（direnv, Doppler, 1Password CLI 等均可）
 
 **推荐模型：**
-- `claude-3-5-sonnet-20241022`：最新 Sonnet 版本，性价比高
-- `claude-3-opus-20240229`：最强性能，适合复杂任务
-- `claude-3-haiku-20240307`：快速响应，成本最低
+- `claude-haiku-4-5-20251001`：用于 Skill 路由（快速、便宜）
+- `claude-3-5-sonnet-20241022`：用于需要更深推理的场景（后端/测试）
 
 ## 实现步骤
 
 ### 1. 获取 API Key
 
-登录 Anthropic Console：
-1. 访问 https://console.anthropic.com/settings/keys
-2. 点击 "Create Key"
-3. 命名密钥（如 "open-webui-production"）
-4. 复制并安全保存密钥（只显示一次）
+1. 登录 Anthropic Console：`https://console.anthropic.com/settings/keys`
+2. 点击 **Create Key**，命名（如 `blockme-dev`）
+3. 复制密钥（格式 `sk-ant-...`），安全保存；UI 只展示一次
 
-### 2. 配置环境变量方式（推荐）
+### 2. 仓库级 `.env` 管理
 
-编辑 `docker-compose.yml`，添加 Claude API 配置：
+在仓库根目录创建 `.env`：
 
-```yaml
-environment:
-  - OPENAI_API_BASE_URLS=https://api.anthropic.com/v1
-  - OPENAI_API_KEYS=sk-ant-api03-xxxxx  # 你的 Claude API Key
-  - ENABLE_OPENAI_API=true
+```bash
+cd /Users/woohelps/CascadeProjects/blockme
+cp mvp/.env.example .env  # 如已存在可跳过
+
+cat <<'EOF' > .env
+ANTHROPIC_API_KEY=sk-ant-xxx
+GLM_API_KEY=  # 任务03 中填充
+EOF
 ```
 
-**说明：**
-- Open WebUI 使用 OpenAI 兼容接口格式
-- Anthropic API 支持 OpenAI 格式调用
-- 通过环境变量配置避免明文存储密钥
+- 将 `.env` 添加到 `.gitignore`（已配置）
+- 运行任务前执行 `export $(grep -v '^#' .env | xargs)` 或使用 `direnv` 自动加载
 
-### 3. 配置界面方式（灵活）
+### 3. 让 `mvp/` CLI 感知密钥
 
-如果不使用环境变量，可以通过管理员界面配置：
+`mvp/main.py` 在启动时会从 `mvp/.env` 加载配置：
 
-1. 登录 Open WebUI 管理员账号
-2. 进入 **Admin Panel** → **Settings** → **Connections**
-3. 找到 **OpenAI API** 配置区域
-4. 填写：
-   - **API Base URL**: `https://api.anthropic.com/v1`
-   - **API Key**: 你的 Claude API Key
-5. 点击保存
+```bash
+cp .env mvp/.env  # 或者在 shell 中 export
+cd mvp
+uv venv && source .venv/bin/activate
+uv sync
+python skill_router.py  # 第一次调用 Claude Haiku
+```
 
-### 4. 添加 Claude 模型
+（`load_env()` 会自动解析 `mvp/.env`，无需额外代码修改。）
 
-进入 **Admin Panel** → **Models**：
+### 4. 为 FastAPI/服务端预留配置
 
-1. 点击 "Add Model"
-2. 填写模型 ID：
-   - `claude-3-5-sonnet-20241022`
-   - `claude-3-opus-20240229`
-3. 设置模型显示名称（如 "Claude 3.5 Sonnet"）
-4. 配置参数：
-   - **Max Tokens**: 4096（输出长度）
-   - **Temperature**: 0.7（创造性）
-   - **Context Length**: 200000（上下文窗口）
+当创建 `backend/.env` 时沿用同一变量名：
 
-### 5. 配置 Vision API 支持
+```bash
+mkdir -p backend
+cat <<'EOF' > backend/.env
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+GLM_API_KEY=${GLM_API_KEY}
+EOF
+```
 
-对于文档处理需求，需要确保启用图像输入：
+在 FastAPI 启动脚本中加载：
 
-在模型配置中：
-1. 勾选 **"Supports Vision"** 选项
-2. 设置 **Max Image Size**: 32MB
-3. 设置 **Max Pages**: 100（PDF 处理限制）
+```python
+from dotenv import load_dotenv
+load_dotenv()  # 允许 uvicorn 在本地读取 backend/.env
+```
+
+CI/CD 中可以通过密钥管理服务（GitHub Actions secrets、1Password Connect 等）注入同名环境变量，保证多环境一致。
+
+### 5. API 可用性自检
+
+使用以下脚本验证连接：
+
+```bash
+python - <<'PY'
+from anthropic import Anthropic
+import os
+
+client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+resp = client.messages.create(
+    model="claude-haiku-4-5-20251001",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "测试一下 BlockMe 开发环境"}]
+)
+print(resp.content[0].text)
+PY
+```
+
+若打印出 Claude 的回复，即表示配置成功。若失败请检查：
+- 变量是否已导出
+- 网络/代理是否允许访问 `api.anthropic.com`
+- Key 是否过期或超额
 
 ## 关键代码提示
 
-**docker-compose.yml 完整配置示例：**
+### `.env` 模板
 
-```yaml
-services:
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    environment:
-      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
-      - OPENAI_API_BASE_URLS=https://api.anthropic.com/v1
-      - OPENAI_API_KEYS=${CLAUDE_API_KEY}
-      - ENABLE_OPENAI_API=true
-      # Vision 相关配置
-      - ENABLE_IMAGE_GENERATION=false
-      - IMAGE_SIZE_LIMIT=33554432  # 32MB in bytes
-```
-
-**使用 .env 文件管理密钥：**
-
-创建 `.env` 文件：
 ```bash
-WEBUI_SECRET_KEY=your-random-secret-key
-CLAUDE_API_KEY=sk-ant-api03-xxxxx
+# 仓库根目录 .env / backend/.env
+ANTHROPIC_API_KEY=sk-ant-xxx
+GLM_API_KEY=sk-glm-xxx
+HTTP_PROXY=
+HTTPS_PROXY=
 ```
 
-在 `docker-compose.yml` 中引用：
-```yaml
-env_file:
-  - .env
-```
+### Skill Router 读取方式
 
-**Python 测试脚本（验证 API 可用性）：**
+`mvp/skill_router.py` 默认按如下逻辑读取：
 
 ```python
-import anthropic
+self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+if not self.api_key:
+    raise ValueError("未找到 ANTHROPIC_API_KEY")
+```
 
-client = anthropic.Anthropic(api_key="sk-ant-api03-xxxxx")
+只需确保环境变量在进程启动时可见即可，无需修改代码。
 
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    messages=[
-        {"role": "user", "content": "测试连接"}
-    ]
-)
-print(message.content)
+### FastAPI 依赖（后续任务引用）
+
+```python
+from anthropic import Anthropic
+claude = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+def route_skills(query: str):
+    return claude.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": build_prompt(query)}]
+    )
 ```
 
 ## 测试验证
 
-### 1. 基础对话测试
-
-在 Open WebUI 聊天界面：
-1. 选择 Claude 模型
-2. 发送测试消息："请用中文自我介绍"
-3. 确认收到正常回复
-
-### 2. Vision API 测试
-
-上传一张包含文字的图片：
-1. 点击上传图标
-2. 选择一张截图或扫描文档
-3. 询问："请提取图片中的文字"
-4. 确认 Claude 能正确识别和提取内容
-
-### 3. API 配额检查
-
-访问 Anthropic Console 查看：
-- API 调用次数
-- Token 使用量
-- 费用统计
-
-### 4. 错误处理测试
-
-故意输入错误的 API Key：
-- 应显示友好的错误提示
-- 不应泄露敏感信息
+1. **脚本连通性**：运行第 5 步脚本，确保能返回文本
+2. **MVP 路由测试**：`python mvp/skill_router.py`，验证 Haiku 输出 JSON
+3. **CLI 端到端**：`python mvp/main.py`，提问“萨省 PST 税率是多少？”，confirm 路由/回答
+4. **（未来）FastAPI 健康检查**：在后端实现后，调用 `/health` 并触发一次 Claude 请求确认配置复用
 
 ## 注意事项
 
-**成本控制：**
-1. Claude API 按 Token 计费：
-   - 输入：~$3/M tokens（Sonnet）
-   - 输出：~$15/M tokens（Sonnet）
-2. Vision API 额外收费：~$0.003/图像
-3. 建议设置每月预算上限
-
-**速率限制：**
-- 免费层：有较低的 RPM 限制
-- 付费层：根据账户等级不同
-- 超限会返回 429 错误，需实现重试逻辑
-
-**安全最佳实践：**
-1. 不要将 API Key 提交到 Git 仓库
-2. 使用 `.env` 文件并添加到 `.gitignore`
-3. 定期轮换 API Key
-4. 使用只读权限的 Key（如果可能）
-
-**国内网络问题：**
-- Anthropic API 可能需要代理访问
-- 配置 Docker 容器代理：
-  ```yaml
-  environment:
-    - HTTP_PROXY=http://your-proxy:port
-    - HTTPS_PROXY=http://your-proxy:port
-  ```
-
-**模型版本管理：**
-- Claude 模型会定期更新
-- 使用带日期的模型 ID（如 `-20241022`）确保稳定性
-- 关注 Anthropic 发布公告，及时更新到新版本
-
-**Open WebUI 适配说明：**
-1. **OpenAI 兼容模式**：
-   - Open WebUI 通过 OpenAI 兼容接口连接 Claude
-   - 设置 `OPENAI_API_BASE_URLS=https://api.anthropic.com/v1`
-   - 某些平台可能需要选择"Anthropic"连接器而非"OpenAI"
-
-2. **模型 ID 格式**：
-   - 使用完整模型 ID：`claude-haiku-4-5` 或 `claude-haiku-4-5-20251001`
-   - 避免使用别名，可能导致识别失败
-
-3. **API 密钥格式**：
-   - Claude API Key 格式：`sk-ant-api03-xxxxx`
-   - 与 OpenAI Key 格式不同，注意区分
-
-4. **连接测试**：
-   - 配置后务必在 Open WebUI 界面测试连接
-   - 检查模型列表是否正确显示
-   - 发送测试消息验证响应正常
-
-5. **常见问题**：
-   - 若连接失败，检查是否需要代理
-   - 确认 API Key 有足够余额
-   - 查看 Docker 日志排查错误：`docker logs <container-id>`
+- **成本监控**：Haiku 费用低（~$0.004/次），Sonnet 较高；优先在路由/推理场景区分模型
+- **速率限制**：若并发高，需实现指数退避重试；MVP 阶段建议串行
+- **安全**：禁止将 API Key 写入仓库或日志；CI 中使用密钥服务注入
+- **代理**：若需代理，设置 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量，并告知 `requests`/`anthropic`
+- **多环境策略**：可设置 `ANTHROPIC_API_KEY_DEV/PROD`，通过启动脚本决定加载哪个 key
 
 ## 依赖关系
 
 **前置任务：**
-- 任务01：Docker 部署 Open WebUI
+- 任务01：搭建 Svelte 前端环境（可选同步执行；本任务只需准备密钥）
 
 **后置任务：**
-- 任务07：Claude Vision API 集成（文档处理）
-- 任务13：意图识别模块（可选择使用 Claude）
+- 任务07：Claude Vision API 集成（依赖同一 Key）
+- 任务13：意图识别/路由模块（直接使用 Haiku）
+- 任务15：FastAPI 聊天接口（统一从环境读取配置）

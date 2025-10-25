@@ -22,7 +22,7 @@
 docs/llm-agent-prompts/
 ├── README.md                          # 本文档
 ├── phase-01-environment/              # 阶段1：环境搭建（4个文档）
-│   ├── 01-docker-deploy-openwebui.md
+│   ├── 01-setup-svelte-frontend.md
 │   ├── 02-configure-claude-api.md
 │   ├── 03-configure-glm-api.md
 │   └── 04-setup-python-dependencies.md
@@ -39,11 +39,11 @@ docs/llm-agent-prompts/
 ├── phase-04-dynamic-loading/          # 阶段4：动态加载引擎（3个文档）
 │   ├── 13-intent-recognition-module.md
 │   ├── 14-knowledge-retrieval-engine.md
-│   └── 15-filter-pipeline-integration.md
+│   └── 15-fastapi-chat-integration.md
 └── phase-05-testing-optimization/     # 阶段5：测试优化（3个文档）
     ├── 16-document-processing-tests.md
     ├── 17-cost-optimization-strategies.md
-    └── 18-ui-workflow-optimization.md
+    └── 18-svelte-frontend-development.md
 ```
 
 ## 🚀 使用指南
@@ -187,14 +187,14 @@ docs/llm-agent-prompts/
 ## 🎯 里程碑
 
 ### MVP（最小可行产品）- 2周
-- 完成阶段 1-3（环境 + 文档处理 + 知识库）
-- 支持基本的文档上传和检索
-- 命令行操作
+- 利用仓库中的 `mvp/` CLI（`mvp/README.md`）验证阶段4核心链路：Skill 路由 + 知识注入 + 回答
+- 同步落实阶段 1-3 的准备工作（文档处理、知识生成、索引标准化），为 CLI 提供真实数据
+- 以命令行/后端接口为主，便于快速迭代
 
 ### 完整版 - 3周
-- 完成所有阶段
-- 动态知识加载
-- 完整 UI
+- 在现有 CLI 能力基础上完成全部阶段
+- 增加 FastAPI + SvelteKit 前后端（阶段1、4、5）
+- 支持 Skill 动态加载 + UI 协作
 
 ### 生产级 - 4周+
 - 性能优化
@@ -204,22 +204,25 @@ docs/llm-agent-prompts/
 ## 📝 快速开始
 
 ```bash
-# 1. 克隆或创建项目
+# 1. 定位仓库
 cd /Users/woohelps/CascadeProjects/blockme
 
-# 2. 阅读第一个文档
+# 2. 阅读阶段文档，明确任务依赖
 cat docs/llm-agent-prompts/phase-01-environment/01-setup-svelte-frontend.md
 
-# 3. 开始实施
-# 按照文档指导逐步完成每个任务
+# 3. 运行现有 MVP，熟悉 Skill 路由链路
+cd mvp
+uv venv && source .venv/bin/activate
+uv sync
+python main.py  # 详见 mvp/README.md
 
-# 4. 启动前端和后端
-cd frontend && npm run dev  # 启动 Svelte 前端 (http://localhost:5173)
-cd backend && uv run uvicorn main:app --reload  # 启动 FastAPI 后端 (http://localhost:8000)
+# 4. 根据文档逐步补齐 frontend/backend 等子项目
+#    完成阶段1-5时再创建 frontend/ backend 目录并运行对应服务
 
-# 5. 测试验证
-# 每完成一个任务，运行对应的测试确保质量
+# 5. 每完成一个任务，执行文档中的测试步骤确保质量
 ```
+
+> 当前仅有 `mvp/` CLI 可运行；Svelte 前端与 FastAPI 后端会在完成对应阶段后新增。请在任务交付中说明如何将新的后端/前端与 `mvp/` 复用或替换。
 
 ## 🤝 贡献指南
 

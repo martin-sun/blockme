@@ -2,7 +2,7 @@
 
 ## 任务目标
 
-为 Open WebUI 自定义开发（Pipelines、Functions）搭建 Python 开发环境，安装文档处理、AI API 调用、向量检索等必需的 Python 库。使用 `uv` 工具管理虚拟环境和依赖，确保环境隔离和可复现性。
+为 BlockMe 的文档处理、FastAPI 服务以及 `mvp/` CLI 链路搭建统一的 Python 开发环境，安装文档处理、AI API 调用、轻量知识管理等必需依赖。使用 `uv` 管理虚拟环境，确保后续各阶段共享同一依赖集合。
 
 ## 技术要求
 
@@ -60,7 +60,7 @@ uv init
 [project]
 name = "blockme-knowledge-system"
 version = "0.1.0"
-description = "Open WebUI 知识库系统"
+description = "BlockMe 知识库系统"
 requires-python = ">=3.10"
 
 dependencies = [
@@ -365,7 +365,8 @@ print(f"✓ JSON 序列化成功")
 ## 依赖关系
 
 **前置任务：**
-- 任务01：Docker 部署 Open WebUI
+- 任务02：配置 Claude API（准备环境变量）
+- 任务03：配置 GLM API（确保 SDK 密钥可用）
 
 **后置任务：**
 - 任务05：PDF 转图像模块开发

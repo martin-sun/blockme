@@ -4,7 +4,7 @@
 
 ## 📋 任务背景
 
-**项目**：Open WebUI + Claude Skill-like 知识库系统
+**项目**：BlockMe（Svelte 前端 + FastAPI 后端 + Claude/GLM Skill 引擎）
 **任务**：将原 RAG 方案的文档更新为 Skill-like 方案
 **进度**：已完成 6/9 个文档，剩余 3 个待更新
 
@@ -225,283 +225,133 @@ class SkillMetadataManager:
 
 ---
 
-### 任务 2: 更新 15-filter-pipeline-integration.md
+### 任务 2: 更新 15-fastapi-chat-integration.md
 
-**文件路径**: `docs/llm-agent-prompts/phase-04-dynamic-loading/15-filter-pipeline-integration.md`
+**文件路径**: `docs/llm-agent-prompts/phase-04-dynamic-loading/15-fastapi-chat-integration.md`
 
 **修改要求**：
 
 1. **任务目标**：
-   - 将 Skill 引擎集成为 Open WebUI Filter/Function
-   - 替换原有的 RAG 检索逻辑
+   - 将 SkillEngine（任务14）封装为 FastAPI 聊天接口
+   - 同时支持 REST (JSON) 与 SSE (流式) 响应
+   - 对接 Svelte 前端和 `mvp/` CLI，统一返回技能信息
 
 2. **技术要求**：
-   - 集成 SkillEngine（任务14）
-   - 支持 Open WebUI Filter API
-   - 实现为 Python Function
-   - 处理对话历史
+   - FastAPI >= 0.100 / uvicorn / pydantic v2
+   - 读取 `ANTHROPIC_API_KEY`、`GLM_API_KEY`，与任务02/03一致
+   - SkillEngine 作为依赖，提供加载的 Skills、路由信息、token 统计
+   - 完善错误处理：Key 缺失、路由失败、Claude/GLM 超时
 
 3. **实现步骤**：
 
-**步骤 1**: 创建 Open WebUI Filter
+**步骤 1**：搭建 FastAPI 项目骨架
+
+```
+backend/
+└── app/
+    ├── main.py
+    ├── api/routes/chat.py
+    ├── models/schemas.py
+    └── services/chat_service.py
+```
+
+**步骤 2**：实现 ChatService
 
 ```python
-# filters/skill_knowledge_filter.py
+# app/services/chat_service.py
 
-"""
-title: Skill Knowledge Filter
-description: 动态加载相关 Skills 到对话上下文
-author: Your Name
-version: 1.0.0
-"""
+from anthropic import Anthropic, AsyncAnthropic
+from app.models.schemas import Message, ChatResponse, SkillInfo, StreamChunk
+from app.services.skill_engine import SkillEngine
 
-from typing import Optional, Dict, List
-from pydantic import BaseModel, Field
-import os
-
-# 导入 Skill 引擎（需要将实现放在 filters 目录）
-from .skill_engine import SkillEngine
-
-
-class Filter:
-    """Open WebUI Filter for Skill-based Knowledge Loading"""
-
-    class Valves(BaseModel):
-        """配置参数"""
-        SKILLS_DIR: str = Field(
-            default="knowledge_base/skills",
-            description="Skills 目录路径"
-        )
-        CLAUDE_API_KEY: str = Field(
-            default="",
-            description="Claude API Key"
-        )
-        ENABLE_SKILL_LOADING: bool = Field(
-            default=True,
-            description="是否启用 Skill 自动加载"
-        )
-        MIN_CONFIDENCE: str = Field(
-            default="medium",
-            description="最低路由置信度 (low/medium/high)"
-        )
-
+class ChatService:
     def __init__(self):
-        self.valves = self.Valves()
-        self.engine: Optional[SkillEngine] = None
+        self.skill_engine = SkillEngine(...)
+        self.sync_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.async_client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-    def _init_engine(self):
-        """懒加载 Skill 引擎"""
-        if self.engine is None and self.valves.ENABLE_SKILL_LOADING:
-            api_key = self.valves.CLAUDE_API_KEY or os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
-                print("⚠️  未配置 Claude API Key，Skill 加载功能已禁用")
-                return False
-
-            try:
-                self.engine = SkillEngine(
-                    skills_dir=self.valves.SKILLS_DIR,
-                    api_key=api_key
-                )
-                print(f"✅ Skill 引擎初始化成功")
-                return True
-            except Exception as e:
-                print(f"❌ Skill 引擎初始化失败: {e}")
-                return False
-
-        return self.engine is not None
-
-    def inlet(self, body: Dict, __user__: Optional[Dict] = None) -> Dict:
-        """
-        在消息发送到 LLM 前处理（注入 Skills）
-
-        Args:
-            body: 请求体，包含 messages
-            __user__: 用户信息
-
-        Returns:
-            修改后的 body
-        """
-        if not self.valves.ENABLE_SKILL_LOADING:
-            return body
-
-        if not self._init_engine():
-            return body
-
-        try:
-            # 提取用户最新消息
-            messages = body.get("messages", [])
-            if not messages:
-                return body
-
-            last_message = messages[-1]
-            if last_message.get("role") != "user":
-                return body
-
-            user_query = last_message.get("content", "")
-            if not user_query:
-                return body
-
-            # 提取对话历史（排除最新消息）
-            conversation_history = messages[:-1] if len(messages) > 1 else None
-
-            # 使用 Skill 引擎路由和加载
-            result = self.engine.answer_question(
-                user_query=user_query,
-                conversation_history=conversation_history
+    async def chat(self, user_message: str, conversation_history: list[Message] | None = None) -> ChatResponse:
+        result = self.skill_engine.answer_question(user_message, conversation_history)
+        if not result.success:
+            return ChatResponse(
+                answer=f"抱歉，处理失败：{result.error}",
+                loaded_skills=[],
+                routing_info={"error": result.error}
             )
 
-            if not result.success or not result.loaded_skills:
-                print(f"⚠️  未找到相关 Skills 或执行失败")
-                return body
-
-            # 检查置信度
-            confidence = result.routing_info.get("confidence", "low")
-            if confidence == "low" and self.valves.MIN_CONFIDENCE in ["medium", "high"]:
-                print(f"⚠️  路由置信度过低 ({confidence})，跳过 Skill 注入")
-                return body
-
-            # 构建知识上下文
-            knowledge_context = self._build_knowledge_context(result)
-
-            # 将知识注入到用户消息前
-            # 方式1：作为系统消息注入
-            skill_message = {
-                "role": "system",
-                "content": knowledge_context
-            }
-
-            # 插入到最新消息之前
-            messages.insert(-1, skill_message)
-
-            # 更新 body
-            body["messages"] = messages
-
-            # 添加元数据（供 outlet 使用）
-            body["__skill_metadata__"] = {
-                "loaded_skills": [s["skill_id"] for s in result.loaded_skills],
-                "routing_info": result.routing_info,
-                "tokens_used": result.tokens_used
-            }
-
-            print(f"✅ 已注入 {len(result.loaded_skills)} 个 Skills")
-
-        except Exception as e:
-            print(f"❌ Skill 加载失败: {e}")
-            # 失败时返回原始 body，不影响正常对话
-
-        return body
-
-    def outlet(self, body: Dict, __user__: Optional[Dict] = None) -> Dict:
-        """
-        在 LLM 响应返回给用户后处理（可选：添加元数据）
-
-        Args:
-            body: 响应体
-            __user__: 用户信息
-
-        Returns:
-            修改后的 body
-        """
-        # 可以在这里添加 Skills 使用信息到响应中
-        skill_metadata = body.get("__skill_metadata__")
-
-        if skill_metadata:
-            # 示例：在响应末尾添加来源标注
-            messages = body.get("messages", [])
-            if messages and messages[-1].get("role") == "assistant":
-                loaded_skills = skill_metadata.get("loaded_skills", [])
-                if loaded_skills:
-                    citation = f"\n\n---\n*📚 参考知识: {', '.join(loaded_skills)}*"
-                    messages[-1]["content"] += citation
-
-        return body
-
-    def _build_knowledge_context(self, result) -> str:
-        """构建知识上下文"""
-        from .skill_engine import SkillContextBuilder
-
-        builder = SkillContextBuilder()
-        context = builder.build_context(
-            loaded_skills=[
-                self.engine.skill_loader.get_skill(s["skill_id"])
-                for s in result.loaded_skills
-            ],
-            routing_info=result.routing_info
+        messages = self._build_messages(result, user_message, conversation_history)
+        response = self.sync_client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            system="你是一个专业的知识库助手...",
+            max_tokens=2048,
+            messages=messages,
         )
 
-        return context
+        return ChatResponse(
+            answer=response.content[0].text,
+            loaded_skills=[s["skill_id"] for s in result.loaded_skills],
+            tokens_used=response.usage.input_tokens + response.usage.output_tokens,
+            routing_info=result.routing_info,
+        )
+
+    async def chat_stream(...):
+        # 先 yield 已加载技能，再将 Claude 输出以 SSE 形式流式返回
+        ...
 ```
 
-**步骤 2**: 创建 Open WebUI Function（可选，功能类似）
+**步骤 3**：编写 FastAPI 路由
 
 ```python
-# functions/skill_qa_function.py
+# app/api/routes/chat.py
 
-"""
-title: Skill Q&A Function
-description: 基于 Skills 的问答功能
-author: Your Name
-version: 1.0.0
-"""
+router = APIRouter()
+chat_service = ChatService()
 
-from typing import Dict, Optional
-from pydantic import BaseModel, Field
+@router.post("/", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest):
+    return await chat_service.chat(
+        user_message=request.message,
+        conversation_history=request.conversation_history,
+    )
 
+@router.post("/stream")
+async def chat_stream_endpoint(request: ChatRequest):
+    async def event_generator():
+        async for chunk in chat_service.chat_stream(
+            user_message=request.message,
+            conversation_history=request.conversation_history,
+        ):
+            yield format_sse(chunk)
 
-class Tools:
-    """Open WebUI Function for Skill-based Q&A"""
-
-    class Valves(BaseModel):
-        SKILLS_DIR: str = Field(default="knowledge_base/skills")
-        CLAUDE_API_KEY: str = Field(default="")
-
-    def __init__(self):
-        self.valves = self.Valves()
-
-    def ask_knowledge_base(
-        self,
-        question: str,
-        __user__: Optional[Dict] = None
-    ) -> str:
-        """
-        查询知识库
-
-        Args:
-            question: 用户问题
-
-        Returns:
-            答案
-        """
-        from .skill_engine import SkillEngine
-        import os
-
-        api_key = self.valves.CLAUDE_API_KEY or os.getenv("ANTHROPIC_API_KEY")
-
-        engine = SkillEngine(
-            skills_dir=self.valves.SKILLS_DIR,
-            api_key=api_key
-        )
-
-        result = engine.answer_question(question)
-
-        if result.success:
-            return result.answer
-        else:
-            return f"抱歉，查询失败: {result.error}"
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 ```
 
-4. **测试验证**：
-   - Filter 注入测试
-   - 对话历史处理测试
-   - 置信度过滤测试
-   - 元数据传递测试
+**步骤 4**：文档说明
 
-5. **注意事项**：
-   - Open WebUI Filter API 兼容性
-   - 错误处理不能影响正常对话
-   - 性能优化（缓存、异步）
+- 绘制数据流：用户 → 路由器（Haiku）→ SkillEngine → Claude/GLM → FastAPI 响应
+- 给出 `.env` 示例、启动命令、Svelte 前端如何调用 `/api/chat` & `/api/chat/stream`
+- 描述错误处理、重试、日志与监控点
 
----
+4. **关键代码提示**：
+   - ChatService、SkillEngine 调用示例
+   - SSE `StreamingResponse` 模板
+   - Pydantic 模型（Message/ChatRequest/ChatResponse/StreamChunk）
+
+5. **测试验证**：
+   - `uv run uvicorn app.main:app --reload`
+   - `curl -X POST http://localhost:8000/api/chat -d '{"message": "萨省 PST 税率是多少？"}'`
+   - `curl --no-buffer -X POST http://localhost:8000/api/chat/stream ...` 验证流式输出
+   - 使用 `python mvp/main.py` 指向新的 FastAPI 接口进行集成测试
+
+6. **注意事项**：
+   - 统一管理 API Key，缺失时返回明确错误
+   - SkillEngine 初始化失败时的降级方案（直接调用 Claude/GLM 或返回提示）
+   - 记录路由耗时、token 使用，为任务17成本优化提供数据
+
+7. **依赖关系**：
+   - 任务10/11：Skill 结构与索引
+   - 任务14：SkillEngine（Claude 路由 + GLM 回答）
+   - 任务18：Svelte 前端聊天界面将消费该接口
 
 ### 任务 3: 更新 17-cost-optimization-strategies.md
 
@@ -818,7 +668,7 @@ class HybridRouter:
 完成后，确保：
 
 1. **文档 12** 包含完整的 Skill 元数据管理实现和验证逻辑
-2. **文档 15** 包含可运行的 Open WebUI Filter/Function 代码
+2. **文档 15** 提供完整的 FastAPI 聊天接口（REST + SSE）示例代码
 3. **文档 17** 完整的成本分析和优化策略（移除所有 RAG 相关成本）
 4. 所有代码示例完整、可运行
 5. 测试验证部分详尽
@@ -830,7 +680,7 @@ class HybridRouter:
 - [x] 提供详细的剩余任务指引
 - [x] 包含完整代码示例
 - [ ] 待完成：12-document-metadata-manager.md
-- [ ] 待完成：15-filter-pipeline-integration.md
+- [ ] 待完成：15-fastapi-chat-integration.md
 - [ ] 待完成：17-cost-optimization-strategies.md
 
 ---

@@ -77,6 +77,40 @@
 - LRU 淘汰策略
 - 可配置的缓存大小
 
+### 5. 可选：实现分层路由（为扩展预留）
+
+**背景**：当 Skill 数量超过 50 个时，可以启用两阶段路由来减少成本和提升性能。
+
+**实现策略**：
+- **第一层（预过滤）**：用简单规则快速粗筛（基于 triggers, keywords, domain 等元数据）
+- **第二层（精筛）**：Claude Haiku 对筛选后的候选集进行智能路由
+
+**启用时机**：
+- MVP 阶段（< 50 Skills）：**不启用**，保持简单
+- 扩展期（50-500 Skills）：**建议启用**，显著降低成本
+- 大规模（> 500 Skills）：**必须启用**，否则路由成本过高
+
+**实现要点**：
+```python
+class SkillRouter:
+    def __init__(self, enable_prefilter: bool = False):
+        # MVP 默认不启用，未来可开启
+        self.enable_prefilter = enable_prefilter
+
+    def route(self, query, all_skills):
+        # 第一层：仅在 enable_prefilter=True 且 len(all_skills) > 50 时生效
+        if self.enable_prefilter and len(all_skills) > 50:
+            all_skills = self._prefilter_skills(query, all_skills)
+
+        # 第二层：Claude 智能路由
+        return self._claude_route(query, all_skills)
+```
+
+**收益**：
+- 成本节省：40-60%（减少传给 Claude 的元数据量）
+- 速度提升：20-30%（粗筛非常快速）
+- 质量影响：< 5%（预过滤保留 30% 候选，几乎不影响最终准确率）
+
 ## 关键代码提示
 
 **Claude Skill 路由器核心实现：**
@@ -651,6 +685,13 @@ print(md_catalog)
 - 监控路由准确率
 - 定期分析失败案例
 - 优化 Skills 的 triggers 和 keywords
+
+**分层路由最佳实践：**
+- MVP 阶段（< 50 Skills）：**不启用**，代码保持简单
+- 扩展期（50+ Skills）：**启用预过滤**，在 `main.py` 中设置 `enable_prefilter=True`
+- 定期评估：每增加 50 个 Skills 后，评估是否需要调整 `keep_ratio` 参数
+- 元数据质量：确保 Skills 的 `triggers` 和 `keywords` 准确，预过滤效果更好
+- 监控过滤率：记录预过滤保留的 Skills 数量，确保不会过度过滤
 
 ## 依赖关系
 

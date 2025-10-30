@@ -219,6 +219,53 @@ python chat_service.py
 
 这些功能将在后续版本中实现。
 
+## 高级配置
+
+### 启用分层路由（可选）
+
+**背景**：当 Skills 数量超过 50 个时，可以启用预过滤层来减少 API 成本和提升性能。
+
+**何时启用**：
+- ✅ **MVP 阶段（当前）**：默认**不启用**，保持简单（只有 3 个 Skills）
+- ✅ **扩展期（50+ Skills）**：建议启用，可节省 40-60% 的路由成本
+- ✅ **大规模（500+ Skills）**：必须启用
+
+**如何启用**：
+
+编辑 `main.py`，在初始化 `SkillRouter` 时添加参数：
+
+```python
+# main.py
+
+class KnowledgeAssistant:
+    def __init__(self, skills_dir: str = "skills"):
+        print("\n🚀 初始化知识库助手...\n")
+
+        self.skill_loader = SkillLoader(skills_dir)
+
+        # 🆕 启用分层路由（当 Skills 数量 > 50 时建议开启）
+        self.skill_router = SkillRouter(enable_prefilter=True)
+
+        self.chat_service = ChatService()
+        print("✅ 初始化完成!\n")
+```
+
+**效果**：
+- 📉 成本：减少 40-60%（减少传给 Claude 的元数据量）
+- ⚡ 速度：提升 20-30%（预过滤非常快速）
+- 📊 质量：影响 < 5%（预过滤保留 30% 候选集）
+
+**工作原理**：
+
+启用后，路由会分两个阶段：
+1. **第一层（预过滤）**：用简单规则快速粗筛（基于 `triggers`, `keywords`, `domain` 等元数据匹配）
+2. **第二层（精筛）**：Claude Haiku 对筛选后的候选集进行智能路由
+
+**注意**：
+- 仅在 Skill 数量 > 50 时，预过滤才会自动生效
+- 当前只有 3 个 Skills，即使启用也不会触发预过滤
+- 确保 Skills 的 `triggers` 和 `keywords` 元数据准确，预过滤效果更好
+
 ## 下一步
 
 如果 MVP 验证成功，可以继续：

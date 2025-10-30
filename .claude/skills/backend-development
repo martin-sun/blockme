@@ -1,0 +1,683 @@
+# Backend Development
+
+## Overview
+This skill defines the backend development standards for BlockMe, focusing on FastAPI with LLM integration patterns, async programming, type safety, and proper error handling for a tax-focused document processing system.
+
+## Core Standards
+
+### 1. Type Safety Requirements
+All functions must have complete type annotations. No `Any` types allowed except in specific LLM response handling.
+
+```python
+# ✅ Good - Complete type annotations
+async def process_tax_document(
+    document_id: str,
+    user_id: str,
+    processing_options: ProcessingOptions | None = None
+) -> ProcessingResult:
+    """Process a tax document with LLM analysis."""
+    pass
+
+# ❌ Bad - Missing type annotations
+async def process_document(doc_id, user_id, options=None):
+    """Process a document."""
+    pass
+```
+
+### 2. Async Programming Standards
+All I/O operations must be async. This includes database calls, external API calls, file operations, and LLM interactions.
+
+```python
+# ✅ Good - Proper async patterns
+async def get_user_documents(
+    user_id: str,
+    limit: int = 50,
+    offset: int = 0
+) -> list[Document]:
+    """Get user's documents with pagination."""
+    async with get_db_session() as session:
+        result = await session.execute(
+            select(Document)
+            .where(Document.user_id == user_id)
+            .limit(limit)
+            .offset(offset)
+            .order_by(Document.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+# ❌ Bad - Synchronous database operations
+def get_user_documents(user_id: str, limit: int = 50) -> list[Document]:
+    with get_db_session() as session:
+        result = session.execute(
+            select(Document).where(Document.user_id == user_id)
+        )
+        return result.scalars().all()
+```
+
+### 3. Structured Logging
+Use structured logging with proper context. Never use `print()` for logging.
+
+```python
+import logging
+import json
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# ✅ Good - Structured logging with context
+async def analyze_document_with_llm(document_id: str, content: str) -> dict[str, Any]:
+    """Analyze document using LLM."""
+    logger.info(
+        "Starting document analysis",
+        extra={
+            "document_id": document_id,
+            "content_length": len(content),
+            "operation": "document_analysis"
+        }
+    )
+
+    try:
+        result = await llm_service.analyze_tax_document(content)
+        logger.info(
+            "Document analysis completed",
+            extra={
+                "document_id": document_id,
+                "document_type": result.get("document_type"),
+                "confidence": result.get("confidence"),
+                "operation": "document_analysis"
+            }
+        )
+        return result
+
+    except LLMServiceError as e:
+        logger.error(
+            "LLM analysis failed",
+            extra={
+                "document_id": document_id,
+                "error": str(e),
+                "operation": "document_analysis"
+            },
+            exc_info=True
+        )
+        raise
+
+# ❌ Bad - Print statements and unstructured logging
+async def analyze_document(document_id: str, content: str):
+    print(f"Analyzing document {document_id}")
+    result = await llm_service.analyze(content)
+    print(f"Analysis complete: {result}")
+    return result
+```
+
+### 4. Error Handling Patterns
+Use proper exception handling with specific error types and meaningful messages.
+
+```python
+# Custom exception types
+class DocumentProcessingError(Exception):
+    """Base exception for document processing errors."""
+    pass
+
+class LLMServiceError(DocumentProcessingError):
+    """LLM service related errors."""
+    pass
+
+class DocumentValidationError(DocumentProcessingError):
+    """Document validation errors."""
+    pass
+
+# ✅ Good - Proper error handling with context
+async def extract_tax_information(
+    document_path: str,
+    document_type: DocumentType
+) -> TaxInformation:
+    """Extract tax information from document."""
+    try:
+        # Validate document
+        if not await validate_document_format(document_path):
+            raise DocumentValidationError(
+                f"Unsupported document format: {document_path}"
+            )
+
+        # Extract content
+        content = await extract_document_content(document_path)
+
+        # Analyze with LLM
+        analysis = await llm_service.analyze_tax_document(
+            content=content,
+            document_type=document_type,
+            jurisdiction=TaxJurisdiction.ONTARIO  # Default jurisdiction
+        )
+
+        return TaxInformation.from_llm_response(analysis)
+
+    except DocumentValidationError:
+        # Re-raise validation errors
+        raise
+    except LLMServiceError as e:
+        # Log and re-raise LLM errors
+        logger.error(
+            "LLM service error during tax extraction",
+            extra={"document_path": document_path, "error": str(e)}
+        )
+        raise DocumentProcessingError(
+            f"Failed to analyze document with LLM: {e}"
+        ) from e
+    except Exception as e:
+        # Handle unexpected errors
+        logger.error(
+            "Unexpected error during tax information extraction",
+            extra={"document_path": document_path},
+            exc_info=True
+        )
+        raise DocumentProcessingError(
+            f"Unexpected error processing document: {e}"
+        ) from e
+
+# ❌ Bad - Bare except and generic errors
+async def extract_tax_info(doc_path):
+    try:
+        content = extract_content(doc_path)
+        result = llm_analyze(content)
+        return result
+    except:
+        return None
+```
+
+## FastAPI Application Structure
+
+### 1. Application Factory Pattern
+```python
+# app/main.py
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.config import env_config
+from app.database import init_db
+from app.routers import documents, auth, tax_qa
+from app.middleware import LoggingMiddleware
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events."""
+    # Startup
+    logger.info("Starting BlockMe backend application")
+    await init_db()
+    logger.info("Database initialized")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down BlockMe backend application")
+
+def create_app() -> FastAPI:
+    """Create FastAPI application."""
+    app = FastAPI(
+        title=env_config.app_name,
+        version=env_config.app_version,
+        description="Tax-focused knowledge base Q&A system",
+        lifespan=lifespan
+    )
+
+    # Middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=env_config.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_middleware(LoggingMiddleware)
+
+    # Include routers
+    app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+    app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
+    app.include_router(tax_qa.router, prefix="/api/v1/tax-qa", tags=["Tax Q&A"])
+
+    return app
+
+app = create_app()
+```
+
+### 2. API Router Patterns
+```python
+# app/routers/documents.py
+from typing import Annotated
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import JSONResponse
+from app.schemas.document import (
+    DocumentCreate,
+    DocumentResponse,
+    ProcessingOptions,
+    ProcessingResult
+)
+from app.services.auth import get_current_user
+from app.services.document import DocumentService
+from app.models.user import User
+
+router = APIRouter()
+
+@router.post("/upload", response_model=DocumentResponse)
+async def upload_document(
+    file: UploadFile = File(...),
+    processing_options: Annotated[ProcessingOptions, Depends()] = None,
+    current_user: Annotated[User, Depends(get_current_user)] = None
+) -> DocumentResponse:
+    """Upload and process a tax document."""
+
+    # Validate file
+    if not DocumentService.is_supported_format(file.filename):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file format. Supported formats: {DocumentService.get_supported_formats()}"
+        )
+
+    if file.size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024):.1f}MB"
+        )
+
+    try:
+        # Process document
+        document_service = DocumentService()
+        result = await document_service.process_upload(
+            file=file,
+            user_id=current_user.id,
+            options=processing_options
+        )
+
+        return DocumentResponse.from_processing_result(result)
+
+    except DocumentValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except LLMServiceError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="Document processing service temporarily unavailable"
+        )
+    except Exception as e:
+        logger.error(
+            "Unexpected error during document upload",
+            extra={"user_id": current_user.id, "filename": file.filename},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error during document processing"
+        )
+
+@router.get("/", response_model=list[DocumentResponse])
+async def get_user_documents(
+    limit: int = 50,
+    offset: int = 0,
+    document_type: DocumentType | None = None,
+    current_user: Annotated[User, Depends(get_current_user)] = None
+) -> list[DocumentResponse]:
+    """Get user's documents with optional filtering."""
+
+    document_service = DocumentService()
+    documents = await document_service.get_user_documents(
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+        document_type=document_type
+    )
+
+    return [DocumentResponse.from_model(doc) for doc in documents]
+```
+
+### 3. Pydantic Models for Data Validation
+```python
+# app/schemas/tax.py
+from pydantic import BaseModel, Field, validator
+from typing import Optional, List, Dict, Any
+from decimal import Decimal
+from datetime import datetime
+
+class TaxInformation(BaseModel):
+    """Tax information extracted from documents."""
+    document_type: str = Field(..., description="Type of tax document")
+    tax_year: int = Field(..., ge=2015, le=2030, description="Tax year")
+    jurisdiction: str = Field(..., description="Tax jurisdiction")
+    total_income: Optional[Decimal] = Field(None, description="Total income amount")
+    tax_payable: Optional[Decimal] = Field(None, description="Tax payable amount")
+    tax_paid: Optional[Decimal] = Field(None, description="Tax already paid")
+    refund_due: Optional[Decimal] = Field(None, description="Refund amount")
+    confidence_score: float = Field(..., ge=0.0, le=1.0, description="Extraction confidence")
+
+    @validator('refund_due')
+    def calculate_refund(cls, v, values):
+        """Calculate refund if not provided."""
+        if v is None:
+            tax_payable = values.get('tax_payable')
+            tax_paid = values.get('tax_paid')
+            if tax_payable is not None and tax_paid is not None:
+                return tax_paid - tax_payable
+        return v
+
+class TaxQueryRequest(BaseModel):
+    """Request for tax Q&A."""
+    question: str = Field(..., min_length=10, max_length=1000, description="Tax-related question")
+    context: Optional[str] = Field(None, description="Additional context for the question")
+    jurisdiction: Optional[str] = Field("on", description="Tax jurisdiction context")
+    document_ids: Optional[List[str]] = Field(None, description="Specific documents to consider")
+
+class TaxQueryResponse(BaseModel):
+    """Response for tax Q&A."""
+    answer: str = Field(..., description="Answer to the tax question")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Answer confidence")
+    sources: List[str] = Field(default_factory=list, description="Source documents referenced")
+    related_questions: List[str] = Field(default_factory=list, description="Suggested follow-up questions")
+    processing_time_ms: int = Field(..., description="Processing time in milliseconds")
+```
+
+### 4. Database Patterns with SQLAlchemy
+```python
+# app/models/document.py
+from sqlalchemy import Column, String, DateTime, Text, JSON, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from app.database import Base
+import uuid
+
+class Document(Base):
+    """Document model for tax documents."""
+    __tablename__ = "documents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(String(50), nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    document_type = Column(String(50), nullable=False)
+    status = Column(String(20), nullable=False, default="uploaded")
+
+    # Extracted content
+    extracted_text = Column(Text, nullable=True)
+    extracted_metadata = Column(JSON, nullable=True)
+    tax_information = Column(JSON, nullable=True)
+
+    # Processing information
+    processing_started_at = Column(DateTime(timezone=True), nullable=True)
+    processing_completed_at = Column(DateTime(timezone=True), nullable=True)
+    processing_error = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default="now()")
+    updated_at = Column(DateTime(timezone=True), onupdate="now()")
+
+    # Relationships
+    user = relationship("User", back_populates="documents")
+
+    def __repr__(self):
+        return f"<Document(id={self.id}, filename={self.original_filename}, status={self.status})>"
+
+# app/repositories/document.py
+from typing import List, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, or_, desc
+from app.models.document import Document
+from app.schemas.document import DocumentCreate, DocumentUpdate
+
+class DocumentRepository:
+    """Repository for document database operations."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(self, document_data: DocumentCreate) -> Document:
+        """Create a new document."""
+        document = Document(**document_data.dict())
+        self.session.add(document)
+        await self.session.commit()
+        await self.session.refresh(document)
+        return document
+
+    async def get_by_id(self, document_id: str, user_id: str) -> Optional[Document]:
+        """Get document by ID for specific user."""
+        result = await self.session.execute(
+            select(Document).where(
+                and_(Document.id == document_id, Document.user_id == user_id)
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_user_documents(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        document_type: Optional[str] = None
+    ) -> List[Document]:
+        """Get user's documents with pagination and filtering."""
+        query = select(Document).where(Document.user_id == user_id)
+
+        if document_type:
+            query = query.where(Document.document_type == document_type)
+
+        query = query.order_by(desc(Document.created_at)).limit(limit).offset(offset)
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def update_status(
+        self,
+        document_id: str,
+        status: str,
+        error: Optional[str] = None
+    ) -> Optional[Document]:
+        """Update document processing status."""
+        document = await self.get_by_id(document_id)
+        if document:
+            document.status = status
+            if error:
+                document.processing_error = error
+            await self.session.commit()
+            await self.session.refresh(document)
+        return document
+```
+
+### 5. Service Layer Patterns
+```python
+# app/services/llm.py
+from typing import Dict, Any, List
+from app.config import app_config, LLMProvider
+from app.llm.providers import get_llm_provider
+from app.schemas.tax import TaxInformation
+
+class LLMService:
+    """Service for LLM interactions."""
+
+    def __init__(self):
+        self.providers = {
+            LLMProvider.OPENAI: get_llm_provider(LLMProvider.OPENAI),
+            LLMProvider.ANTHROPIC: get_llm_provider(LLMProvider.ANTHROPIC),
+        }
+        self.default_provider = LLMProvider.OPENAI
+
+    async def analyze_tax_document(
+        self,
+        content: str,
+        document_type: str,
+        jurisdiction: str = "on"
+    ) -> Dict[str, Any]:
+        """Analyze tax document content using LLM."""
+
+        # Select appropriate provider
+        provider = self.providers[self.default_provider]
+
+        # Build prompt
+        prompt = self._build_document_analysis_prompt(
+            content=content,
+            document_type=document_type,
+            jurisdiction=jurisdiction
+        )
+
+        try:
+            response = await provider.analyze(prompt)
+            return self._parse_analysis_response(response)
+
+        except Exception as e:
+            logger.error(
+                "LLM document analysis failed",
+                extra={
+                    "document_type": document_type,
+                    "jurisdiction": jurisdiction,
+                    "error": str(e)
+                }
+            )
+            raise LLMServiceError(f"Failed to analyze document: {e}")
+
+    async def answer_tax_question(
+        self,
+        question: str,
+        context: List[str],
+        jurisdiction: str = "on"
+    ) -> Dict[str, Any]:
+        """Answer tax-related question using LLM."""
+
+        provider = self.providers[self.default_provider]
+
+        prompt = self._build_qa_prompt(
+            question=question,
+            context=context,
+            jurisdiction=jurisdiction
+        )
+
+        try:
+            response = await provider.chat(prompt)
+            return self._parse_qa_response(response)
+
+        except Exception as e:
+            logger.error(
+                "LLM tax Q&A failed",
+                extra={
+                    "question": question,
+                    "jurisdiction": jurisdiction,
+                    "error": str(e)
+                }
+            )
+            raise LLMServiceError(f"Failed to answer tax question: {e}")
+
+    def _build_document_analysis_prompt(
+        self,
+        content: str,
+        document_type: str,
+        jurisdiction: str
+    ) -> str:
+        """Build prompt for document analysis."""
+        return f"""
+        You are a Canadian tax expert analyzing a {document_type} for {jurisdiction} jurisdiction.
+
+        Document Content:
+        {content}
+
+        Please extract the following tax information and respond in JSON format:
+        {{
+            "document_type": "{document_type}",
+            "tax_year": <year>,
+            "jurisdiction": "{jurisdiction}",
+            "total_income": <amount or null>,
+            "tax_payable": <amount or null>,
+            "tax_paid": <amount or null>,
+            "key_figures": {{
+                "business_income": <amount>,
+                "employment_income": <amount>,
+                "deductions": <amount>
+            }},
+            "confidence_score": <0.0 to 1.0>,
+            "notes": "<additional observations>"
+        }}
+
+        Only extract information that is clearly present in the document.
+        If information is not available, use null.
+        """
+
+    def _parse_analysis_response(self, response: str) -> Dict[str, Any]:
+        """Parse LLM analysis response."""
+        try:
+            import json
+            return json.loads(response)
+        except json.JSONDecodeError:
+            # Fallback parsing if JSON is malformed
+            return {"error": "Failed to parse LLM response", "raw_response": response}
+```
+
+## Quality Assurance
+
+### Required Quality Checks
+All backend code must pass these quality checks:
+
+```bash
+# Code formatting
+uv run black --check .
+
+# Linting and code quality
+uv run ruff check .
+
+# Type checking
+uv run mypy .
+
+# Security checks
+uv run bandit -r app/
+
+# Testing
+uv run pytest --cov=app tests/
+```
+
+### Pre-commit Hooks
+```python
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/psf/black
+    rev: 23.1.0
+    hooks:
+      - id: black
+        language_version: python3.11
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.0.1
+    hooks:
+      - id: mypy
+        additional_dependencies: [types-all]
+```
+
+## Related Skills
+- **[development-policies](development-policies)** - General development standards
+- **[configuration-management](configuration-management)** - Configuration patterns
+- **[llm-usage-guide](llm-usage-guide)** - LLM integration best practices
+- **[error-handling-transparency](error-handling-transparency)** - Error handling philosophy
+- **[testing-strategy](testing-strategy)** - Backend testing guidelines
+
+## Usage Hints
+Trigger this skill when:
+- Developing new backend endpoints
+- Implementing LLM integration
+- Writing database operations
+- Creating service layer components
+- Handling async operations
+- Setting up API patterns
+- Implementing error handling
+- Writing backend tests
+
+## Quality Checklist
+Before committing backend code:
+- [ ] All functions have type annotations
+- [ ] Async patterns used for I/O operations
+- [ ] Structured logging with proper context
+- [ ] Specific exception types with meaningful messages
+- [ ] Pydantic models for data validation
+- [ ] Quality gates pass (`black`, `ruff`, `mypy`)
+- [ ] Tests written for new functionality
+- [ ] API endpoints have proper OpenAPI documentation
+- [ ] Database operations use repository pattern
+- [ ] LLM integration has proper error handling and fallbacks

@@ -1,0 +1,853 @@
+# Frontend Development
+
+## Overview
+This skill defines frontend development standards for BlockMe, focusing on Svelte 5 with runes, TypeScript strict mode, modern patterns for document processing UI, and proper integration with FastAPI backend services.
+
+## Core Standards
+
+### 1. Svelte 5 with Runes
+Use modern Svelte 5 syntax with runes for reactive state management.
+
+```svelte
+<!-- ✅ Good - Modern Svelte 5 with runes -->
+<script lang="ts">
+  import type { Document } from '$lib/types/document';
+  import { documentApi } from '$lib/api/documents';
+
+  // Props with runes
+  let { userId, initialDocuments = [] }: {
+    userId: string;
+    initialDocuments?: Document[];
+  } = $props();
+
+  // Reactive state with runes
+  let documents = $state<Document[]>(initialDocuments);
+  let loading = $state<boolean>(false);
+  let error = $state<string | null>(null);
+  let selectedDocument = $state<Document | null>(null);
+
+  // Derived values with runes
+  let filteredDocuments = $derived(() =>
+    documents.filter(doc => doc.status === 'processed')
+  );
+
+  // Effects with runes
+  $effect(() => {
+    if (userId) {
+      loadDocuments();
+    }
+  });
+
+  async function loadDocuments() {
+    loading = true;
+    error = null;
+
+    try {
+      documents = await documentApi.getUserDocuments(userId);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to load documents';
+    } finally {
+      loading = false;
+    }
+  }
+
+  function selectDocument(doc: Document) {
+    selectedDocument = doc;
+  }
+</script>
+
+<!-- ❌ Bad - Old Svelte syntax -->
+<script lang="ts">
+  export let userId: string;
+  export let initialDocuments: Document[] = [];
+
+  let documents: Document[] = initialDocuments;
+  let loading: boolean = false;
+  let error: string | null = null;
+
+  $: if (userId) {
+    loadDocuments();
+  }
+</script>
+```
+
+### 2. TypeScript Strict Mode
+All TypeScript files must use strict mode with proper typing. No `any` types allowed except in specific cases.
+
+```typescript
+// ✅ Good - Proper TypeScript with strict typing
+// src/lib/types/document.ts
+export interface Document {
+  id: string;
+  filename: string;
+  originalFilename: string;
+  fileSize: number;
+  mimeType: string;
+  documentType: DocumentType;
+  status: DocumentStatus;
+  extractedText?: string;
+  taxInformation?: TaxInformation;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export enum DocumentType {
+  TAX_RETURN = 'tax_return',
+  INVOICE = 'invoice',
+  RECEIPT = 'receipt',
+  CONTRACT = 'contract'
+}
+
+export enum DocumentStatus {
+  UPLOADED = 'uploaded',
+  PROCESSING = 'processing',
+  PROCESSED = 'processed',
+  FAILED = 'failed'
+}
+
+export interface TaxInformation {
+  documentType: string;
+  taxYear: number;
+  jurisdiction: string;
+  totalIncome?: number;
+  taxPayable?: number;
+  taxPaid?: number;
+  refundDue?: number;
+  confidenceScore: number;
+}
+
+// ✅ Good - Properly typed API functions
+// src/lib/api/documents.ts
+import type { Document, DocumentCreate, DocumentUploadResponse } from '$lib/types/document';
+import { apiClient } from '$lib/api/client';
+
+export const documentApi = {
+  async uploadDocument(file: File, options?: UploadOptions): Promise<DocumentUploadResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options) {
+      formData.append('options', JSON.stringify(options));
+    }
+
+    const response = await apiClient.post<DocumentUploadResponse>('/documents/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    return response.data;
+  },
+
+  async getUserDocuments(
+    userId: string,
+    params?: {
+      limit?: number;
+      offset?: number;
+      documentType?: DocumentType;
+    }
+  ): Promise<Document[]> {
+    const response = await apiClient.get<Document[]>(`/documents`, {
+      params: { userId, ...params },
+    });
+
+    return response.data;
+  },
+
+  async getDocument(documentId: string): Promise<Document> {
+    const response = await apiClient.get<Document>(`/documents/${documentId}`);
+    return response.data;
+  }
+};
+
+// ❌ Bad - Using any types and loose typing
+function processDocument(doc: any): any {
+  return {
+    id: doc.id,
+    name: doc.filename,
+    processed: doc.status === 'done'
+  };
+}
+```
+
+### 3. API Integration Patterns
+All API calls should go through centralized API modules with proper error handling.
+
+```typescript
+// ✅ Good - Centralized API client with error handling
+// src/lib/api/client.ts
+import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
+import { goto } from '$app/navigation';
+import { toast } from '$lib/components/toast';
+
+export interface ApiError {
+  message: string;
+  code?: string;
+  details?: unknown;
+}
+
+class ApiClient {
+  private client: AxiosInstance;
+
+  constructor() {
+    this.client = axios.create({
+      baseURL: '/api/v1',
+      timeout: 30000,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    this.setupInterceptors();
+  }
+
+  private setupInterceptors() {
+    // Request interceptor for auth
+    this.client.interceptors.request.use(
+      (config) => {
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
+
+    // Response interceptor for error handling
+    this.client.interceptors.response.use(
+      (response: AxiosResponse) => response,
+      (error: AxiosError<ApiError>) => {
+        if (error.response?.status === 401) {
+          // Handle authentication error
+          localStorage.removeItem('auth_token');
+          goto('/login');
+          return Promise.reject(error);
+        }
+
+        if (error.response?.status >= 500) {
+          toast.error('Server error. Please try again later.');
+        } else if (error.response?.data?.message) {
+          toast.error(error.response.data.message);
+        } else if (error.code === 'ECONNABORTED') {
+          toast.error('Request timeout. Please check your connection.');
+        } else {
+          toast.error('An unexpected error occurred.');
+        }
+
+        return Promise.reject(error);
+      }
+    );
+  }
+
+  async get<T>(url: string, config?: any): Promise<AxiosResponse<T>> {
+    return this.client.get<T>(url, config);
+  }
+
+  async post<T>(url: string, data?: any, config?: any): Promise<AxiosResponse<T>> {
+    return this.client.post<T>(url, data, config);
+  }
+
+  async put<T>(url: string, data?: any, config?: any): Promise<AxiosResponse<T>> {
+    return this.client.put<T>(url, data, config);
+  }
+
+  async delete<T>(url: string, config?: any): Promise<AxiosResponse<T>> {
+    return this.client.delete<T>(url, config);
+  }
+}
+
+export const apiClient = new ApiClient();
+
+// ✅ Good - Typed API service
+// src/lib/api/tax-qa.ts
+import type { TaxQueryRequest, TaxQueryResponse } from '$lib/types/tax';
+import { apiClient } from './client';
+
+export const taxQaApi = {
+  async askQuestion(request: TaxQueryRequest): Promise<TaxQueryResponse> {
+    const response = await apiClient.post<TaxQueryResponse>('/tax-qa/ask', request);
+    return response.data;
+  },
+
+  async getRelatedQuestions(questionId: string): Promise<string[]> {
+    const response = await apiClient.get<string[]>(`/tax-qa/related/${questionId}`);
+    return response.data;
+  }
+};
+```
+
+### 4. Component Architecture
+Use component-based architecture with clear separation of concerns.
+
+```svelte
+<!-- ✅ Good - Well-structured component -->
+<!-- src/lib/components/DocumentUpload.svelte -->
+<script lang="ts">
+  import type { DocumentUploadResponse, UploadOptions } from '$lib/types/document';
+  import { documentApi } from '$lib/api/documents';
+  import { Button } from '$lib/components/ui/button';
+  import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+  import { Progress } from '$lib/components/ui/progress';
+  import { toast } from '$lib/components/toast';
+
+  // Props
+  let { onUploadSuccess, maxFileSize = 50 * 1024 * 1024 }: {
+    onUploadSuccess: (response: DocumentUploadResponse) => void;
+    maxFileSize?: number;
+  } = $props();
+
+  // State
+  let selectedFile = $state<File | null>(null);
+  let uploading = $state<boolean>(false);
+  let uploadProgress = $state<number>(0);
+  let error = $state<string | null>(null);
+  let dragActive = $state<boolean>(false);
+
+  // File handling
+  function handleFileSelect(event: Event) {
+    const target = event.target as HTMLInputElement;
+    if (target.files && target.files[0]) {
+      handleFile(target.files[0]);
+    }
+  }
+
+  function handleFile(file: File) {
+    error = null;
+
+    // Validate file size
+    if (file.size > maxFileSize) {
+      error = `File too large. Maximum size is ${maxFileSize / (1024 * 1024)}MB`;
+      return;
+    }
+
+    // Validate file type
+    const supportedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!supportedTypes.includes(file.type)) {
+      error = 'Unsupported file type. Please upload PDF or image files.';
+      return;
+    }
+
+    selectedFile = file;
+  }
+
+  // Drag and drop
+  function handleDragOver(event: DragEvent) {
+    event.preventDefault();
+    dragActive = true;
+  }
+
+  function handleDragLeave(event: DragEvent) {
+    event.preventDefault();
+    dragActive = false;
+  }
+
+  function handleDrop(event: DragEvent) {
+    event.preventDefault();
+    dragActive = false;
+
+    if (event.dataTransfer?.files && event.dataTransfer.files[0]) {
+      handleFile(event.dataTransfer.files[0]);
+    }
+  }
+
+  // Upload
+  async function uploadFile() {
+    if (!selectedFile) return;
+
+    uploading = true;
+    uploadProgress = 0;
+    error = null;
+
+    try {
+      const response = await documentApi.uploadDocument(selectedFile, {
+        onProgress: (progress: number) => {
+          uploadProgress = progress;
+        }
+      });
+
+      toast.success('Document uploaded successfully');
+      onUploadSuccess(response);
+
+      // Reset state
+      selectedFile = null;
+      uploadProgress = 0;
+
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Upload failed';
+      toast.error(error);
+    } finally {
+      uploading = false;
+    }
+  }
+
+  // Computed values
+  let uploadButtonText = $derived(
+    uploading ? `Uploading... ${uploadProgress}%` : 'Upload Document'
+  );
+
+  let isUploadDisabled = $derived(
+    uploading || !selectedFile || error !== null
+  );
+</script>
+
+<Card>
+  <CardHeader>
+    <CardTitle>Upload Tax Document</CardTitle>
+  </CardHeader>
+  <CardContent class="space-y-4">
+    <!-- File Input Area -->
+    <div
+      class="border-2 border-dashed rounded-lg p-6 text-center transition-colors"
+      class:border-primary={dragActive}
+      class:bg-muted/50={dragActive}
+      role="button"
+      tabindex="0"
+      ondragover={handleDragOver}
+      ondragleave={handleDragLeave}
+      ondrop={handleDrop}
+      onclick={() => document.getElementById('file-input')?.click()}
+    >
+      <input
+        id="file-input"
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png"
+        class="hidden"
+        onchange={handleFileSelect}
+      />
+
+      {#if selectedFile}
+        <div class="space-y-2">
+          <p class="font-medium">{selectedFile.name}</p>
+          <p class="text-sm text-muted-foreground">
+            {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+          </p>
+        </div>
+      {:else}
+        <div class="space-y-2">
+          <p class="text-muted-foreground">
+            Drag and drop a document here, or click to select
+          </p>
+          <p class="text-xs text-muted-foreground">
+            Supports PDF, JPG, PNG (Max {maxFileSize / (1024 * 1024)}MB)
+          </p>
+        </div>
+      {/if}
+    </div>
+
+    <!-- Error Display -->
+    {#if error}
+      <div class="text-sm text-destructive bg-destructive/10 p-3 rounded">
+        {error}
+      </div>
+    {/if}
+
+    <!-- Upload Progress -->
+    {#if uploading}
+      <div class="space-y-2">
+        <Progress value={uploadProgress} />
+        <p class="text-sm text-center text-muted-foreground">
+          Processing document... {uploadProgress}%
+        </p>
+      </div>
+    {/if}
+
+    <!-- Upload Button -->
+    <Button
+      onclick={uploadFile}
+      disabled={isUploadDisabled}
+      class="w-full"
+    >
+      {uploadButtonText}
+    </Button>
+  </CardContent>
+</Card>
+```
+
+### 5. State Management Patterns
+Use Svelte 5 runes for local state and implement proper patterns for global state.
+
+```typescript
+// ✅ Good - Global state with runes
+// src/lib/stores/auth.ts
+import type { User } from '$lib/types/user';
+import { persist, create } from '@macfja/svelte-persistent-store';
+
+interface AuthState {
+  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
+}
+
+// Create persistent store
+const initialAuthState: AuthState = {
+  user: null,
+  token: null,
+  isAuthenticated: false
+};
+
+export const authStore = create<AuthState>(
+  persist(initialAuthState, 'auth-store', {
+    storage: 'session'
+  })
+);
+
+// Auth actions
+export const authActions = {
+  login(user: User, token: string) {
+    authStore.update(state => ({
+      ...state,
+      user,
+      token,
+      isAuthenticated: true
+    }));
+  },
+
+  logout() {
+    authStore.update(() => initialAuthState);
+  },
+
+  updateUser(user: User) {
+    authStore.update(state => ({
+      ...state,
+      user
+    }));
+  }
+};
+
+// ✅ Good - Reactive derived values
+// src/lib/stores/documents.ts
+import { writable, derived } from 'svelte/store';
+import type { Document, DocumentType } from '$lib/types/document';
+import { documentApi } from '$lib/api/documents';
+
+interface DocumentState {
+  documents: Document[];
+  loading: boolean;
+  error: string | null;
+}
+
+const documentStore = writable<DocumentState>({
+  documents: [],
+  loading: false,
+  error: null
+});
+
+// Derived stores for filtered documents
+export const documentsByType = (type: DocumentType) =>
+  derived(documentStore, $state =>
+    $state.documents.filter(doc => doc.documentType === type)
+  );
+
+export const processedDocuments = derived(
+  documentStore,
+  $state => $state.documents.filter(doc => doc.status === 'processed')
+);
+
+export const recentDocuments = derived(
+  documentStore,
+  $state => $state.documents
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 10)
+);
+```
+
+### 6. Error Handling Patterns
+Implement comprehensive error handling with user-friendly messages.
+
+```svelte
+<!-- ✅ Good - Error boundary and handling -->
+<!-- src/lib/components/ErrorBoundary.svelte -->
+<script lang="ts">
+  interface ErrorInfo {
+    error: Error;
+    componentStack: string;
+  }
+
+  let { fallback }: { fallback: any } = $props();
+  let error: ErrorInfo | null = $state(null);
+
+  // Error boundary handling
+  function handleError(event: CustomEvent<ErrorInfo>) {
+    error = event.detail;
+    console.error('Component error:', error);
+  }
+
+  function resetError() {
+    error = null;
+  }
+</script>
+
+<svelte:window on:error={handleError} />
+
+{#if error}
+  <div class="p-6 border border-destructive rounded-lg bg-destructive/10">
+    <h2 class="text-lg font-semibold text-destructive mb-2">
+      Something went wrong
+    </h2>
+    <p class="text-sm text-muted-foreground mb-4">
+      {error.error.message}
+    </p>
+    {#if fallback}
+      {@render fallback()}
+    {:else}
+      <button
+        onclick={resetError}
+        class="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
+      >
+        Try Again
+      </button>
+    {/if}
+  </div>
+{:else}
+  <slot />
+{/if}
+
+<!-- ✅ Good - Component-level error handling -->
+<!-- src/lib/components/DocumentViewer.svelte -->
+<script lang="ts">
+  import type { Document } from '$lib/types/document';
+  import { documentApi } from '$lib/api/documents';
+  import { LoadingSpinner } from '$lib/components/ui/loading-spinner';
+  import { ErrorMessage } from '$lib/components/ui/error-message';
+
+  let { documentId }: { documentId: string } = $props();
+
+  let document = $state<Document | null>(null);
+  let loading = $state<boolean>(true);
+  let error = $state<string | null>(null);
+
+  async function loadDocument() {
+    loading = true;
+    error = null;
+
+    try {
+      document = await documentApi.getDocument(documentId);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to load document';
+    } finally {
+      loading = false;
+    }
+  }
+
+  $effect(() => {
+    if (documentId) {
+      loadDocument();
+    }
+  });
+</script>
+
+{#if loading}
+  <LoadingSpinner />
+{:else if error}
+  <ErrorMessage
+    message={error}
+    onRetry={loadDocument}
+  />
+{:else if document}
+  <div class="space-y-4">
+    <h2 class="text-xl font-semibold">{document.originalFilename}</h2>
+    <!-- Document content here -->
+  </div>
+{:else}
+  <p class="text-muted-foreground">Document not found</p>
+{/if}
+```
+
+### 7. Performance Optimization
+Implement performance best practices for document processing UI.
+
+```typescript
+// ✅ Good - Virtual scrolling for large lists
+// src/lib/components/VirtualList.svelte -->
+<script lang="ts">
+  import { onMount } from 'svelte';
+
+  let { items, itemHeight = 60, containerHeight = 400 }: {
+    items: any[];
+    itemHeight?: number;
+    containerHeight?: number;
+  } = $props();
+
+  let containerElement: HTMLElement;
+  let scrollTop = $state(0);
+  let viewportHeight = $state(containerHeight);
+
+  // Calculate visible items
+  let visibleItems = $derived(() => {
+    const startIndex = Math.floor(scrollTop / itemHeight);
+    const endIndex = Math.min(
+      startIndex + Math.ceil(viewportHeight / itemHeight) + 1,
+      items.length - 1
+    );
+
+    return items.slice(startIndex, endIndex + 1).map((item, index) => ({
+      item,
+      index: startIndex + index,
+      top: (startIndex + index) * itemHeight
+    }));
+  });
+
+  // Handle scroll
+  function handleScroll() {
+    scrollTop = containerElement.scrollTop;
+  }
+
+  // Handle resize
+  onMount(() => {
+    const resizeObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        viewportHeight = entry.contentRect.height;
+      }
+    });
+
+    resizeObserver.observe(containerElement);
+
+    return () => resizeObserver.disconnect();
+  });
+</script>
+
+<div
+  bind:this={containerElement}
+  class="overflow-auto"
+  style="height: {containerHeight}px"
+  onscroll={handleScroll}
+>
+  <div style="height: {items.length * itemHeight}px; position: relative;">
+    {#each visibleItems as { item, index, top } (item.id || index)}
+      <div
+        style="position: absolute; top: {top}px; height: {itemHeight}px; width: 100%;"
+      >
+        <slot item={item} index={index} />
+      </div>
+    {/each}
+  </div>
+</div>
+
+<!-- ✅ Good - Debounced search -->
+<!-- src/lib/components/DocumentSearch.svelte -->
+<script lang="ts">
+  import { debounce } from 'lodash-es';
+
+  let searchQuery = $state('');
+  let debouncedQuery = $state('');
+  let searching = $state(false);
+
+  // Debounce search input
+  const debouncedSearch = debounce((query: string) => {
+    debouncedQuery = query;
+    searching = false;
+  }, 300);
+
+  function handleSearch(event: Event) {
+    const target = event.target as HTMLInputElement;
+    searchQuery = target.value;
+    searching = true;
+    debouncedSearch(searchQuery);
+  }
+
+  // Reset search when query is cleared
+  $effect(() => {
+    if (!searchQuery) {
+      debouncedQuery = '';
+      searching = false;
+    }
+  });
+</script>
+
+<div class="relative">
+  <input
+    type="text"
+    placeholder="Search documents..."
+    bind:value={searchQuery}
+    oninput={handleSearch}
+    class="w-full px-4 py-2 border rounded-lg"
+  />
+  {#if searching}
+    <div class="absolute right-3 top-2.5">
+      <LoadingSpinner size="sm" />
+    </div>
+  {/if}
+</div>
+```
+
+## Development Workflow
+
+### 1. Component Development
+1. Create component in appropriate directory
+2. Define clear props and types
+3. Implement error handling
+4. Add accessibility features
+5. Write tests for component behavior
+
+### 2. API Integration
+1. Define types for API responses
+2. Create API service functions
+3. Implement proper error handling
+4. Add loading states
+5. Test with various scenarios
+
+### 3. State Management
+1. Identify state scope (local vs global)
+2. Use appropriate state management pattern
+3. Implement proper reactivity
+4. Handle state persistence if needed
+5. Test state transitions
+
+## Quality Assurance
+
+### Required Quality Checks
+```bash
+# Type checking
+npm run check
+
+# Linting and formatting
+npm run lint
+npm run format
+
+# Unit testing
+npm run test
+
+# End-to-end testing
+npm run test:e2e
+
+# Build verification
+npm run build
+```
+
+### Accessibility Standards
+- Use semantic HTML elements
+- Provide proper ARIA labels
+- Ensure keyboard navigation
+- Test with screen readers
+- Maintain color contrast ratios
+
+## Related Skills
+- **[development-policies](development-policies)** - General development standards
+- **[ui-design-system](ui-design-system)** - UI component standards
+- **[error-handling-transparency](error-handling-transparency)** - Error handling philosophy
+- **[testing-strategy](testing-strategy)** - Frontend testing guidelines
+- **[backend-development](backend-development)** - Backend integration patterns
+
+## Usage Hints
+Trigger this skill when:
+- Creating new Svelte components
+- Implementing API integration
+- Managing component state
+- Handling user interactions
+- Optimizing performance
+- Implementing error handling
+- Writing frontend tests
+- Setting up new pages or features
+
+## Quality Checklist
+Before committing frontend code:
+- [ ] Using Svelte 5 runes syntax
+- [ ] TypeScript strict mode compliance
+- [ ] Proper typing for all variables and functions
+- [ ] API calls through centralized modules
+- [ ] Error handling with user-friendly messages
+- [ ] Loading states for async operations
+- [ ] Accessibility compliance
+- [ ] Responsive design considerations
+- [ ] Performance optimizations implemented
+- [ ] Tests written for critical functionality

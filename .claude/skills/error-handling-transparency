@@ -1,0 +1,791 @@
+# Error Handling Transparency
+
+## Overview
+This skill defines the error handling philosophy for BlockMe, emphasizing **禁止隐藏错误，允许透明降级** (Prohibit hiding errors, allow transparent degradation). The system must always be transparent with users about what's happening, especially when dealing with LLM services and document processing.
+
+## Core Philosophy
+
+### Principle 1: No Hidden Errors
+**Never silently fail or return mock data when real operations fail.**
+
+```typescript
+// ❌ BAD - Hiding errors with mock data
+async function getTaxCalculation(income: number): Promise<TaxCalculation> {
+  try {
+    return await taxApi.calculate(income);
+  } catch (error) {
+    // NEVER do this - hiding the error with fake data
+    return {
+      federalTax: income * 0.15,
+      provincialTax: income * 0.05,
+      totalTax: income * 0.20
+    };
+  }
+}
+
+// ✅ GOOD - Transparent error handling
+async function getTaxCalculation(income: number): Promise<TaxCalculation> {
+  try {
+    return await taxApi.calculate(income);
+  } catch (error) {
+    logger.error("Tax calculation failed", { income, error: error.message });
+    throw new TaxCalculationError(
+      "Unable to calculate tax at this time. Please try again later.",
+      { cause: error, income }
+    );
+  }
+}
+```
+
+### Principle 2: Transparent Degradation
+**When services are unavailable, clearly communicate the limitation and provide alternatives.**
+
+```typescript
+// ✅ GOOD - Transparent degradation with clear communication
+async function searchDocuments(query: string): Promise<DocumentSearchResult> {
+  try {
+    // Try advanced semantic search first
+    return await semanticSearchApi.search(query);
+  } catch (SemanticSearchUnavailableError) {
+    logger.warn("Semantic search unavailable, falling back to basic search");
+
+    // Clearly communicate the limitation
+    return {
+      documents: await basicSearchApi.search(query),
+      message: "Showing basic search results. Advanced search features are temporarily unavailable.",
+      searchType: "basic",
+      totalResults: await basicSearchApi.count(query)
+    };
+  } catch (error) {
+    logger.error("All search methods failed", { query, error: error.message });
+    throw new DocumentSearchError(
+      "Search service is currently unavailable. Please try again in a few minutes.",
+      { cause: error, query }
+    );
+  }
+}
+```
+
+### Principle 3: Actionable Error Messages
+**All error messages must provide clear information about what went wrong and what users can do about it.**
+
+```typescript
+// ✅ GOOD - Actionable error messages
+class DocumentUploadError extends Error {
+  constructor(reason: 'size' | 'format' | 'processing', details?: any) {
+    const messages = {
+      size: `Document too large. Maximum file size is 50MB. Your file is ${details.sizeMB}MB.`,
+      format: `Unsupported file format. Supported formats: PDF, JPG, PNG. Your file is ${details.format}.`,
+      processing: `Document processing failed. Please ensure the document is clear and readable.`
+    };
+
+    super(messages[reason]);
+    this.name = 'DocumentUploadError';
+  }
+}
+
+// ✅ GOOD - LLM error handling with actionable advice
+async function analyzeTaxDocument(documentId: string): Promise<DocumentAnalysis> {
+  try {
+    return await llmService.analyzeDocument(documentId);
+  } catch (LLMQuotaExceededError) {
+    throw new ServiceUnavailableError(
+      "Document analysis is temporarily unavailable due to high demand. " +
+      "Please try again in 15 minutes, or contact support if the issue persists.",
+      { code: 'LLM_QUOTA_EXCEEDED', retryAfter: 900 }
+    );
+  } catch (LLMContentFilterError) {
+    throw new ValidationError(
+      "Unable to process this document due to content restrictions. " +
+      "Please ensure the document contains only tax-related information " +
+      "and doesn't include sensitive personal data beyond what's necessary for tax purposes.",
+      { code: 'CONTENT_FILTERED' }
+    );
+  }
+}
+```
+
+## Error Handling Patterns
+
+### 1. Frontend Error Boundaries
+```svelte
+<!-- ✅ GOOD - Comprehensive error boundary -->
+<!-- src/lib/components/ErrorBoundary.svelte -->
+<script lang="ts">
+  import type { ErrorInfo } from '$lib/types/error';
+  import { Button } from '$lib/components/ui/button';
+  import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+
+  let { fallback, onRetry }: {
+    fallback?: () => any;
+    onRetry?: () => void;
+  } = $props();
+
+  let error: ErrorInfo | null = $state(null);
+  let errorId: string | null = $state(null);
+
+  function handleError(event: CustomEvent<ErrorInfo>) {
+    error = event.detail;
+    errorId = generateErrorId();
+
+    // Log error for debugging
+    console.error('Component error:', {
+      errorId,
+      error: error.error.message,
+      stack: error.error.stack,
+      componentStack: error.componentStack
+    });
+
+    // Report to error tracking service
+    reportError(error, errorId);
+  }
+
+  function generateErrorId(): string {
+    return `err_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  function retry() {
+    error = null;
+    errorId = null;
+    onRetry?.();
+  }
+
+  function contactSupport() {
+    const subject = encodeURIComponent(`Error Report - ${errorId}`);
+    const body = encodeURIComponent(`
+I encountered an error while using BlockMe.
+
+Error ID: ${errorId}
+Error Message: ${error?.error.message}
+Time: ${new Date().toISOString()}
+
+Please describe what you were doing when this error occurred:
+    `);
+
+    window.open(`mailto:support@blockme.tax?subject=${subject}&body=${body}`);
+  }
+</script>
+
+<svelte:window on:error={handleError} />
+
+{#if error}
+  <Card class="border-destructive">
+    <CardHeader>
+      <CardTitle class="text-destructive flex items-center gap-2">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        Something went wrong
+      </CardTitle>
+    </CardHeader>
+    <CardContent class="space-y-4">
+      <div class="text-sm">
+        <p class="font-medium mb-2">We encountered an unexpected error:</p>
+        <p class="text-muted-foreground">{error.error.message}</p>
+      </div>
+
+      <div class="text-xs text-muted-foreground">
+        Error ID: <code class="bg-muted px-1 py-0.5 rounded">{errorId}</code>
+      </div>
+
+      <div class="flex gap-2">
+        <Button onclick={retry} variant="outline">
+          Try Again
+        </Button>
+        <Button onclick={contactSupport} variant="ghost">
+          Contact Support
+        </Button>
+      </div>
+
+      {#if fallback}
+        <div class="pt-4 border-t">
+          {@render fallback()}
+        </div>
+      {/if}
+    </CardContent>
+  </Card>
+{:else}
+  <slot />
+{/if}
+```
+
+### 2. Backend Error Handling
+```python
+# ✅ GOOD - Comprehensive backend error handling
+# app/errors/handlers.py
+from fastapi import Request, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+import logging
+import uuid
+
+logger = logging.getLogger(__name__)
+
+class BlockMeError(Exception):
+    """Base exception for BlockMe application."""
+    def __init__(self, message: str, error_code: str = None, details: dict = None):
+        super().__init__(message)
+        self.message = message
+        self.error_code = error_code
+        self.details = details or {}
+        self.error_id = str(uuid.uuid4())
+
+class DocumentProcessingError(BlockMeError):
+    """Document processing related errors."""
+    pass
+
+class LLMServiceError(BlockMeError):
+    """LLM service related errors."""
+    pass
+
+class ValidationError(BlockMeError):
+    """Input validation errors."""
+    pass
+
+async def blockme_exception_handler(request: Request, exc: BlockMeError):
+    """Handle BlockMe application exceptions."""
+    logger.error(
+        f"Application error: {exc.message}",
+        extra={
+            "error_id": exc.error_id,
+            "error_code": exc.error_code,
+            "path": request.url.path,
+            "method": request.method,
+            "details": exc.details
+        },
+        exc_info=True
+    )
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "message": exc.message,
+                "code": exc.error_code,
+                "error_id": exc.error_id,
+                "details": exc.details if _is_development() else {}
+            }
+        }
+    )
+
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle FastAPI validation errors."""
+    error_id = str(uuid.uuid4())
+
+    logger.warning(
+        f"Validation error: {exc}",
+        extra={
+            "error_id": error_id,
+            "path": request.url.path,
+            "method": request.method,
+            "errors": exc.errors()
+        }
+    )
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "message": "Invalid input data",
+                "code": "VALIDATION_ERROR",
+                "error_id": error_id,
+                "details": {
+                    "fields": exc.errors()
+                }
+            }
+        }
+    )
+
+def _is_development() -> bool:
+    """Check if running in development mode."""
+    import os
+    return os.getenv("ENVIRONMENT") == "development"
+
+# ✅ GOOD - Service layer error handling
+# app/services/document.py
+async def process_document_upload(
+    file_content: bytes,
+    filename: str,
+    user_id: str
+) -> DocumentProcessingResult:
+    """Process uploaded document with comprehensive error handling."""
+
+    # Validate file
+    if len(file_content) > MAX_FILE_SIZE:
+        raise ValidationError(
+            f"File too large. Maximum size is {MAX_FILE_SIZE / (1024*1024):.1f}MB",
+            error_code="FILE_TOO_LARGE",
+            details={"actual_size": len(file_content), "max_size": MAX_FILE_SIZE}
+        )
+
+    if not _is_supported_format(filename):
+        raise ValidationError(
+            f"Unsupported file format: {filename}",
+            error_code="UNSUPPORTED_FORMAT",
+            details={
+                "filename": filename,
+                "supported_formats": list(SUPPORTED_FORMATS)
+            }
+        )
+
+    try:
+        # Extract text content
+        extracted_text = await extract_text_from_document(file_content)
+
+        if not extracted_text.strip():
+            raise DocumentProcessingError(
+                "Unable to extract text from document. Please ensure the document is clear and readable.",
+                error_code="TEXT_EXTRACTION_FAILED",
+                details={"filename": filename}
+            )
+
+        # Analyze with LLM
+        try:
+            analysis = await llm_service.analyze_tax_document(extracted_text)
+        except LLMQuotaExceededError:
+            raise LLMServiceError(
+                "Document analysis is temporarily unavailable due to high demand. Please try again later.",
+                error_code="LLM_QUOTA_EXCEEDED",
+                details={"retry_after": 900}  # 15 minutes
+            )
+        except LLMContentFilterError:
+            raise LLMServiceError(
+                "Document content could not be processed. This may be due to content restrictions or poor image quality.",
+                error_code="LLM_CONTENT_FILTERED",
+                details={"filename": filename}
+            )
+
+        # Save processed document
+        document = await save_processed_document(
+            user_id=user_id,
+            filename=filename,
+            extracted_text=extracted_text,
+            analysis=analysis
+        )
+
+        logger.info(
+            "Document processed successfully",
+            extra={
+                "document_id": document.id,
+                "user_id": user_id,
+                "filename": filename
+            }
+        )
+
+        return DocumentProcessingResult.from_document(document)
+
+    except Exception as e:
+        logger.error(
+            "Document processing failed",
+            extra={
+                "user_id": user_id,
+                "filename": filename,
+                "error": str(e)
+            },
+            exc_info=True
+        )
+
+        # Re-raise known errors
+        if isinstance(e, (ValidationError, DocumentProcessingError, LLMServiceError)):
+            raise
+
+        # Wrap unknown errors
+        raise DocumentProcessingError(
+            "An unexpected error occurred while processing your document. Please try again or contact support.",
+            error_code="PROCESSING_FAILED",
+            details={"filename": filename}
+        ) from e
+```
+
+### 3. LLM Service Error Handling
+```python
+# ✅ GOOD - LLM service with transparent error handling
+# app/services/llm.py
+import asyncio
+from typing import Dict, Any, Optional
+from app.config import app_config
+from app.errors import LLMServiceError
+
+class LLMService:
+    """Service for LLM interactions with robust error handling."""
+
+    def __init__(self):
+        self.providers = self._initialize_providers()
+        self.circuit_breakers = self._initialize_circuit_breakers()
+
+    async def analyze_tax_document(self, content: str, document_type: str) -> Dict[str, Any]:
+        """Analyze tax document with fallback and transparent error reporting."""
+
+        if not content or len(content.strip()) < 10:
+            raise LLMServiceError(
+                "Document appears to be empty or contains very little text. " +
+                "Please upload a document with sufficient content for analysis.",
+                error_code="INSUFFICIENT_CONTENT"
+            )
+
+        # Try primary provider first
+        primary_provider = self.providers[app_config.llm.default_chat_provider]
+
+        try:
+            if not self.circuit_breakers[primary_provider.name].can_execute():
+                raise LLMServiceError(
+                    f"{primary_provider.name} service is temporarily experiencing issues. Trying alternative providers...",
+                    error_code="PRIMARY_PROVIDER_UNAVAILABLE"
+                )
+
+            result = await primary_provider.analyze_document(content, document_type)
+            self.circuit_breakers[primary_provider.name].record_success()
+
+            return self._validate_and_parse_result(result, document_type)
+
+        except LLMTimeoutError:
+            self.circuit_breakers[primary_provider.name].record_failure()
+            logger.warning(f"Timeout from {primary_provider.name}, trying fallback")
+
+            return await self._try_fallback_providers(content, document_type)
+
+        except LLMQuotaExceededError:
+            self.circuit_breakers[primary_provider.name].record_failure()
+            logger.warning(f"Quota exceeded for {primary_provider.name}")
+
+            raise LLMServiceError(
+                "Document analysis is temporarily unavailable due to service limits. " +
+                "Please try again in 15 minutes.",
+                error_code="QUOTA_EXCEEDED",
+                details={"retry_after": 900, "provider": primary_provider.name}
+            )
+
+        except LLMContentFilterError:
+            raise LLMServiceError(
+                "Unable to process this document due to content restrictions. " +
+                "This may happen if the document contains sensitive information " +
+                "or content that triggers safety filters.",
+                error_code="CONTENT_FILTERED"
+            )
+
+        except Exception as e:
+            self.circuit_breakers[primary_provider.name].record_failure()
+            logger.error(f"Unexpected error from {primary_provider.name}: {e}")
+
+            return await self._try_fallback_providers(content, document_type)
+
+    async def _try_fallback_providers(self, content: str, document_type: str) -> Dict[str, Any]:
+        """Try alternative providers with transparent communication."""
+
+        fallback_providers = [
+            provider for name, provider in self.providers.items()
+            if name != app_config.llm.default_chat_provider
+        ]
+
+        for provider in fallback_providers:
+            if not self.circuit_breakers[provider.name].can_execute():
+                continue
+
+            try:
+                logger.info(f"Trying fallback provider: {provider.name}")
+                result = await provider.analyze_document(content, document_type)
+                self.circuit_breakers[provider.name].record_success()
+
+                # Add note about fallback usage
+                result["provider_used"] = provider.name
+                result["fallback_used"] = True
+
+                return self._validate_and_parse_result(result, document_type)
+
+            except Exception as e:
+                self.circuit_breakers[provider.name].record_failure()
+                logger.warning(f"Fallback provider {provider.name} also failed: {e}")
+                continue
+
+        # All providers failed
+        raise LLMServiceError(
+            "All document analysis services are currently unavailable. " +
+            "This is usually a temporary issue. Please try again in a few minutes.",
+            error_code="ALL_PROVIDERS_UNAVAILABLE",
+            details={"suggestion": "Try uploading the document again in 5-10 minutes"}
+        )
+
+    def _validate_and_parse_result(self, result: Dict[str, Any], document_type: str) -> Dict[str, Any]:
+        """Validate and parse LLM result to ensure quality."""
+
+        if not result or "analysis" not in result:
+            raise LLMServiceError(
+                "Document analysis returned incomplete results. Please try uploading the document again.",
+                error_code="INCOMPLETE_RESULT"
+            )
+
+        analysis = result["analysis"]
+
+        # Validate required fields based on document type
+        required_fields = self._get_required_fields(document_type)
+        missing_fields = [field for field in required_fields if field not in analysis]
+
+        if missing_fields:
+            logger.warning(
+                f"LLM analysis missing required fields: {missing_fields}",
+                extra={"document_type": document_type, "analysis": analysis}
+            )
+
+            # Don't fail completely, but note the limitation
+            analysis["missing_fields"] = missing_fields
+            analysis["completeness_warning"] = (
+                f"Some information could not be extracted: {', '.join(missing_fields)}"
+            )
+
+        return result
+```
+
+### 4. User Communication Patterns
+```svelte
+<!-- ✅ GOOD - Transparent status communication -->
+<!-- src/lib/components/ProcessingStatus.svelte -->
+<script lang="ts">
+  import type { ProcessingStatus } from '$lib/types/document';
+  import { Card, CardContent } from '$lib/components/ui/card';
+  import { Badge } from '$lib/components/ui/badge';
+  import { Button } from '$lib/components/ui/button';
+
+  let { status, onRetry, onContactSupport }: {
+    status: ProcessingStatus;
+    onRetry?: () => void;
+    onContactSupport?: () => void;
+  } = $props();
+
+  let statusConfig = $derived(() => {
+    switch (status.state) {
+      case 'processing':
+        return {
+          color: 'blue',
+          icon: '⏳',
+          title: 'Processing Document',
+          description: 'Analyzing your document with AI. This usually takes 30-60 seconds.',
+          showProgress: true,
+          actions: []
+        };
+
+      case 'completed':
+        return {
+          color: 'green',
+          icon: '✅',
+          title: 'Processing Complete',
+          description: 'Your document has been successfully analyzed and added to your knowledge base.',
+          showProgress: false,
+          actions: ['view_document']
+        };
+
+      case 'failed':
+        return {
+          color: 'red',
+          icon: '❌',
+          title: 'Processing Failed',
+          description: status.error?.message || 'An error occurred while processing your document.',
+          showProgress: false,
+          actions: status.error?.retryable ? ['retry', 'contact_support'] : ['contact_support']
+        };
+
+      case 'limited':
+        return {
+          color: 'yellow',
+          icon: '⚠️',
+          title: 'Limited Processing',
+          description: status.limitation?.message || 'Some features are currently unavailable.',
+          showProgress: false,
+          actions: ['view_limited_results', 'retry_later']
+        };
+
+      default:
+        return {
+          color: 'gray',
+          icon: '📄',
+          title: 'Unknown Status',
+          description: 'Document status is unknown. Please contact support.',
+          showProgress: false,
+          actions: ['contact_support']
+        };
+    }
+  });
+</script>
+
+<Card>
+  <CardContent class="p-6">
+    <div class="flex items-start gap-4">
+      <div class="text-2xl">{statusConfig.icon}</div>
+
+      <div class="flex-1 space-y-2">
+        <div class="flex items-center gap-2">
+          <h3 class="font-semibold">{statusConfig.title}</h3>
+          {#if status.error?.code}
+            <Badge variant="outline" class="text-xs">
+              {status.error.code}
+            </Badge>
+          {/if}
+        </div>
+
+        <p class="text-sm text-muted-foreground">
+          {statusConfig.description}
+        </p>
+
+        {#if statusConfig.showProgress && status.progress}
+          <div class="w-full bg-gray-200 rounded-full h-2">
+            <div
+              class="bg-blue-600 h-2 rounded-full transition-all duration-300"
+              style="width: {status.progress}%"
+            ></div>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            {status.progress}% complete
+            {#if status.estimatedTimeRemaining}
+              • ~{status.estimatedTimeRemaining} seconds remaining
+            {/if}
+          </p>
+        {/if}
+
+        {#if status.error?.details && Object.keys(status.error.details).length > 0}
+          <details class="text-xs">
+            <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
+              Technical Details
+            </summary>
+            <pre class="mt-2 p-2 bg-muted rounded text-xs overflow-auto">
+              {JSON.stringify(status.error.details, null, 2)}
+            </pre>
+          </details>
+        {/if}
+
+        {#if statusConfig.actions.length > 0}
+          <div class="flex gap-2 pt-2">
+            {#if statusConfig.actions.includes('retry')}
+              <Button size="sm" onclick={onRetry}>
+                Try Again
+              </Button>
+            {/if}
+
+            {#if statusConfig.actions.includes('contact_support')}
+              <Button size="sm" variant="outline" onclick={onContactSupport}>
+                Contact Support
+              </Button>
+            {/if}
+
+            {#if statusConfig.actions.includes('view_document')}
+              <Button size="sm" variant="outline">
+                View Document
+              </Button>
+            {/if}
+
+            {#if statusConfig.actions.includes('retry_later')}
+              <Button size="sm" variant="outline" disabled>
+                Retry Later (Auto-retry enabled)
+              </Button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+  </CardContent>
+</Card>
+```
+
+## Error Reporting and Monitoring
+
+### 1. Structured Error Logging
+```python
+# ✅ GOOD - Comprehensive error logging
+import logging
+import json
+from typing import Dict, Any
+
+class StructuredLogger:
+    def __init__(self, name: str):
+        self.logger = logging.getLogger(name)
+
+    def log_error(
+        self,
+        message: str,
+        error: Exception,
+        context: Dict[str, Any] = None,
+        user_id: str = None,
+        request_id: str = None
+    ):
+        """Log error with full context for debugging."""
+
+        error_data = {
+            "message": message,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "context": context or {},
+            "user_id": user_id,
+            "request_id": request_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        # Add error details if available
+        if hasattr(error, 'details'):
+            error_data["error_details"] = error.details
+
+        if hasattr(error, 'error_code'):
+            error_data["error_code"] = error.error_code
+
+        self.logger.error(
+            f"{message}: {str(error)}",
+            extra=error_data,
+            exc_info=True
+        )
+
+        # Also send to error tracking service
+        self.send_to_error_tracking(error_data)
+
+    def send_to_error_tracking(self, error_data: Dict[str, Any]):
+        """Send error data to external error tracking service."""
+        try:
+            # Integration with Sentry, DataDog, etc.
+            pass
+        except Exception as e:
+            # Don't let error tracking failures break the application
+            self.logger.warning(f"Failed to send error to tracking service: {e}")
+```
+
+## Quality Guidelines
+
+### Do's (✅ Allowed)
+- **Show cached data with clear warnings**: "Showing cached data (updated at 2:30 PM)"
+- **Functional degradation**: "Chart rendering failed, showing table view instead"
+- **Retry mechanisms with backoff**: Transparent retries with user notification
+- **Fallback providers**: "Using backup analysis service, results may vary"
+- **Partial results**: "Some fields couldn't be extracted. Please review and complete manually."
+- **Queue processing**: "High demand detected. Your document is queued for processing (position: 3)"
+
+### Don'ts (❌ Prohibited)
+- **Silent failures**: Never return fake data when real operations fail
+- **Hidden errors**: Don't pretend everything is working when it's not
+- **Mock responses**: Never return hardcoded or example data as real results
+- **Auto-correction without notice**: Don't silently fix data problems
+- **Dismissive error messages**: Avoid "An error occurred" without context
+
+## Related Skills
+- **[development-policies](development-policies)** - General development standards
+- **[backend-development](backend-development)** - Backend error handling patterns
+- **[frontend-development](frontend-development)** - Frontend error boundaries
+- **[llm-usage-guide](llm-usage-guide)** - LLM-specific error handling
+- **[testing-strategy](testing-strategy)** - Error scenario testing
+
+## Usage Hints
+Trigger this skill when:
+- Implementing error handling for any feature
+- Designing user-facing error messages
+- Setting up error monitoring and logging
+- Creating fallback mechanisms
+- Handling LLM service failures
+- Planning retry logic
+- Designing degradation strategies
+
+## Quality Checklist
+- [ ] Error messages are clear and actionable
+- [ ] No silent failures or hidden errors
+- [ ] Fallback behaviors are transparent to users
+- [ ] Error logging provides sufficient context
+- [ ] Users can recover from errors or get help
+- [ ] System gracefully degrades when services are unavailable
+- [ ] Error tracking is implemented for monitoring
+- [ ] Error messages avoid technical jargon when possible
+- [ ] Retry mechanisms are implemented with appropriate backoff
+- [ ] Users are informed about service limitations

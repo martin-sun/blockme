@@ -1,0 +1,205 @@
+# Core Architecture
+
+## Overview
+BlockMe is a tax-focused knowledge base Q&A system that uses LLM technology to process documents and answer tax-related questions. The system follows a clear architectural pattern designed for scalability, maintainability, and optimal user experience.
+
+## Core Principles
+
+### 1. Frontend-Backend Separation
+- **Clear API Contracts**: All communication between frontend and backend through well-defined REST APIs
+- **JSON Payloads**: Consistent data structures with clear typing
+- **Stateless Backend**: No session-based business logic on the backend
+- **Frontend State Management**: UI state managed in Svelte 5 with proper patterns
+
+### 2. AI-Assisted User Control
+The system follows a three-step pattern for all AI-assisted operations:
+1. **AI Suggestion**: LLM analyzes document/query and suggests action
+2. **User Confirmation**: User reviews and confirms/modifies the suggestion
+3. **System Execution**: System performs the operation based on user approval
+
+```
+Document Upload → AI Analysis → User Review → Confirmation → Save to Knowledge Base
+User Query → LLM Understanding → Knowledge Base Search → Intelligent Display
+```
+
+### 3. Direct API Integration
+- **Minimal Abstraction**: Direct API calls without unnecessary layers
+- **Performance Focus**: Optimized for document processing and LLM response times
+- **Clear Error Paths**: Direct error propagation with meaningful messages
+
+### 4. Dual-Track Data Flow
+
+**Track 1: Structured Operations (CRUD)**
+- Document upload and processing
+- Knowledge base management
+- User preferences and settings
+- System administration
+
+**Track 2: Natural Language Processing**
+- Document content analysis
+- Tax-related Q&A
+- Intelligent search and retrieval
+- Context-aware recommendations
+
+### 5. Session Responsibility Separation
+- **Session Only Handles**: Authentication and user identification
+- **No Business State**: Tax calculations, document processing state in session
+- **Explicit Parameters**: All business operations receive required data explicitly
+
+## System Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │   Backend API   │    │   LLM Services  │
+│   (SvelteKit)   │◄──►│   (FastAPI)     │◄──►│   (Claude/GLM)  │
+│                 │    │                 │    │                 │
+│ • Document UI   │    │ • Document Proc │    │ • Vision API    │
+│ • Query Interface│   │ • Knowledge Mgmt│    │ • Text Analysis │
+│ • Results Display│   │ • Tax Logic     │    │ • Tax Q&A       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │   Data Storage  │
+                    │                 │
+                    │ • Document Store│
+                    │ • Knowledge Base│
+                    │ • User Data     │
+                    └─────────────────┘
+```
+
+## Key Architectural Decisions
+
+### 1. Document Processing Pipeline
+- **Multi-format Support**: PDF, Word, Excel, PowerPoint, images
+- **Vision API Integration**: LLM-powered document analysis
+- **Structured Extraction**: Tax-relevant information extraction
+- **User Validation**: User can review and correct extracted data
+
+### 2. Knowledge Base Architecture
+- **Document-centric**: Each document becomes searchable knowledge
+- **Tax-aware**: Understanding of tax jurisdictions and rules
+- **Contextual Retrieval**: Intelligent document selection based on query
+- **Continuous Learning**: System improves with user feedback
+
+### 3. Multi-LLM Strategy
+- **General LLM**: Chat, analysis, entity extraction (Claude/GPT)
+- **Vision LLM**: Document and image processing (Claude/GPT-4V)
+- **Specialized LLM**: Tax-specific queries (potentially cheaper models)
+- **Fallback Systems**: Graceful degradation when LLM services are unavailable
+
+### 4. Performance Optimization
+- **Asynchronous Processing**: All I/O operations are async
+- **Caching Strategy**: Intelligent caching of LLM responses and processed documents
+- **Background Processing**: Heavy document processing in background jobs
+- **Streaming Responses**: Real-time response streaming for chat interactions
+
+## Data Flow Patterns
+
+### Document Upload Flow
+```
+1. User uploads document → Frontend validates
+2. Frontend sends to Backend → Backend stores temporarily
+3. Backend requests LLM analysis → Vision API processes document
+4. LLM returns structured data → Backend validates and stores
+5. Backend notifies Frontend → User reviews extracted data
+6. User confirms → Backend saves to knowledge base
+```
+
+### Query Processing Flow
+```
+1. User submits query → Frontend sends to Backend
+2. Backend analyzes query → LLM understands intent and context
+3. Backend searches knowledge base → Relevant documents retrieved
+4. Backend synthesizes response → LLM generates intelligent answer
+5. Response streamed to Frontend → Real-time display to user
+```
+
+## Technology Stack
+
+### Frontend
+- **SvelteKit**: Modern web framework with excellent performance
+- **TypeScript**: Type safety and better developer experience
+- **Tailwind CSS**: Utility-first CSS framework
+- **Material Design 3**: Consistent design system
+
+### Backend
+- **FastAPI**: Modern, fast web framework for building APIs
+- **Python**: Type-safe async programming
+- **SQLAlchemy**: Database ORM with proper typing
+- **Pydantic**: Data validation and settings management
+
+### LLM Integration
+- **Multiple Providers**: Claude, GPT, GLM for flexibility
+- **Vision API**: Document and image processing
+- **Prompt Management**: Template system with dynamic fragments
+- **Cost Optimization**: Intelligent model selection and caching
+
+### Infrastructure
+- **PostgreSQL**: Primary database for structured data
+- **Vector Database**: For semantic search and retrieval
+- **File Storage**: Document storage with efficient retrieval
+- **Background Jobs**: Async task processing
+
+## Quality Principles
+
+### 1. Type Safety
+- All functions have proper type hints
+- Database models with typed relationships
+- API request/response schemas validated
+- Frontend props and state properly typed
+
+### 2. Error Handling
+- Transparent error messages with actionable advice
+- Graceful degradation when services are unavailable
+- Comprehensive logging for debugging
+- User-friendly error recovery options
+
+### 3. Performance
+- Async patterns throughout the stack
+- Intelligent caching at multiple levels
+- Database query optimization
+- Frontend performance monitoring
+
+### 4. Security
+- Document access control
+- API rate limiting
+- Input validation and sanitization
+- Secure handling of LLM API keys
+
+## Development Patterns
+
+### API Design
+- RESTful endpoints with clear naming
+- Consistent response structures
+- Proper HTTP status codes
+- Comprehensive API documentation
+
+### Database Design
+- Normalized structure for data integrity
+- Efficient indexing for query performance
+- Migration system for schema changes
+- Proper foreign key relationships
+
+### Frontend Patterns
+- Component-based architecture
+- Proper state management with Svelte 5 runes
+- Responsive design for all screen sizes
+- Accessibility compliance
+
+## Related Skills
+- [development-policies](development-policies) - Development standards and guidelines
+- [backend-development](backend-development) - Backend coding standards
+- [frontend-development](frontend-development) - Frontend coding standards
+- [configuration-management](configuration-management) - Configuration architecture
+- [llm-usage-guide](llm-usage-guide) - LLM integration patterns
+- [error-handling-transparency](error-handling-transparency) - Error handling philosophy
+
+## Usage Hints
+Trigger this skill when:
+- Designing new features or architecture
+- Onboarding new developers to the project
+- Making architectural decisions
+- Needing to understand system design principles
+- Planning integrations with external services

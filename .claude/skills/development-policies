@@ -1,0 +1,248 @@
+# Development Policies
+
+## Overview
+This skill serves as the central hub for all development policies and standards in the BlockMe project. It establishes language standards, coding conventions, and provides navigation to specialized development guidelines.
+
+## Language Standards
+
+### English Language Requirements
+**English is required for the following elements:**
+
+1. **Code Identifiers** - All variable names, function names, class names, constants
+   ```python
+   # ✅ Good
+   def process_tax_document(document_path: str) -> dict[str, Any]:
+       tax_rate = calculate_hst_rate(province="Ontario")
+
+   # ❌ Bad
+   def 处理税务文档(文档路径: str) -> dict[str, Any]:
+       税率 = 计算消费税税率(省份="安大略")
+   ```
+
+2. **User Interface Text** - All text that appears in the application interface
+   ```svelte
+   <!-- ✅ Good -->
+   <button>Upload Tax Document</button>
+   <p>Processing your document...</p>
+
+   <!-- ❌ Bad -->
+   <button>上传税务文档</button>
+   <p>正在处理您的文档...</p>
+   ```
+
+3. **API Response Messages** - All messages returned to the client
+   ```python
+   # ✅ Good
+   return {"message": "Document uploaded successfully", "document_id": doc_id}
+
+   # ❌ Bad
+   return {"message": "文档上传成功", "document_id": doc_id}
+   ```
+
+4. **Log Messages** - All logging entries for system monitoring
+   ```python
+   # ✅ Good
+   logger.info("Document processing started", extra={"document_id": doc_id})
+
+   # ❌ Bad
+   logger.info("文档处理开始", extra={"document_id": doc_id})
+   ```
+
+### Chinese Language Allowances
+**Chinese is allowed (but not required) for:**
+
+1. **Code Comments** - Explanatory comments within code
+   ```python
+   def calculate_tax_amount(amount: float, rate: float) -> float:
+       # 计算税额 - Calculate tax amount
+       return amount * rate
+   ```
+
+2. **Docstrings** - Function and class documentation
+   ```python
+   def extract_tax_info(document: Document) -> TaxInfo:
+       """
+       从文档中提取税务信息
+       Extract tax information from document
+
+       Args:
+           document: The tax document to process
+
+       Returns:
+           TaxInfo: Extracted tax information
+       """
+   ```
+
+3. **Documentation Files** - README files, guides, and internal documentation
+4. **Commit Messages** - Git commit messages can use Chinese for clarity
+5. **Internal Team Communication** - Slack messages, emails, etc.
+
+## Navigation to Specialized Policies
+
+This skill provides navigation to specialized development policies. Each policy focuses on specific aspects of development to maintain clarity and efficiency.
+
+### Core Development Skills
+- **[core-architecture](core-architecture)** - System design principles and architectural patterns
+- **[backend-development](backend-development)** - Python/FastAPI coding standards and patterns
+- **[frontend-development](frontend-development)** - Svelte 5 + TypeScript development standards
+- **[configuration-management](configuration-management)** - Three-tier configuration architecture
+
+### Quality and Process Skills
+- **[workflow-policies](workflow-policies)** - Development workflow and approval processes
+- **[testing-strategy](testing-strategy)** - Testing approaches and automation guidelines
+- **[error-handling-transparency](error-handling-transparency)** - Error handling philosophy and patterns
+- **[debugging-troubleshooting](debugging-troubleshooting)** - Systematic problem-solving approaches
+
+### Specialized Skills
+- **[llm-usage-guide](llm-usage-guide)** - LLM integration patterns and best practices
+- **[ui-design-system](ui-design-system)** - User interface design standards
+- **[tax-standards](tax-standards)** - Tax domain-specific standards and conventions
+
+## Development Standards
+
+### Code Quality Standards
+1. **Type Safety** - All code must be properly typed
+   ```python
+   # ✅ Good
+   async def process_document(
+       document_id: str,
+       user_id: str,
+       options: ProcessingOptions | None = None
+   ) -> ProcessingResult:
+
+   # ❌ Bad
+   async def process_document(doc_id, user, opts=None):
+   ```
+
+2. **Error Handling** - Proper exception handling and logging
+   ```python
+   # ✅ Good
+   try:
+       result = await analyze_document(document_path)
+       logger.info("Document analyzed successfully", extra={"document_id": document_id})
+       return result
+   except DocumentAnalysisError as e:
+       logger.error("Document analysis failed", extra={"document_id": document_id, "error": str(e)})
+       raise
+   except Exception as e:
+       logger.error("Unexpected error during document analysis", extra={"document_id": document_id}, exc_info=True)
+       raise DocumentProcessingError(f"Failed to analyze document: {e}") from e
+
+   # ❌ Bad
+   try:
+       result = await analyze_document(document_path)
+       return result
+   except:
+       return None
+   ```
+
+3. **Async Patterns** - Use async/await for all I/O operations
+   ```python
+   # ✅ Good
+   async def get_user_documents(user_id: str) -> list[Document]:
+       async with get_db_session() as session:
+           return await session.execute(
+               select(Document).where(Document.user_id == user_id)
+           )
+
+   # ❌ Bad
+   def get_user_documents(user_id: str) -> list[Document]:
+       with get_db_session() as session:
+           return session.execute(
+               select(Document).where(Document.user_id == user_id)
+           )
+   ```
+
+### Documentation Standards
+1. **API Documentation** - All endpoints must have proper OpenAPI documentation
+2. **Code Comments** - Complex logic must be explained in comments
+3. **README Files** - Each major component should have explanatory documentation
+4. **Architecture Decision Records** - Important architectural decisions must be documented
+
+### Testing Standards
+1. **Unit Tests** - All business logic must have unit tests
+2. **Integration Tests** - API endpoints must have integration tests
+3. **Manual Test Plans** - Complex workflows must have documented test plans
+4. **Coverage Requirements** - Minimum 80% code coverage for new code
+
+## Development Workflow
+
+### Code Review Process
+1. **Self-Review** - Developers must review their own code before creating PRs
+2. **Peer Review** - All changes require peer review
+3. **Automated Checks** - All automated quality checks must pass
+4. **Manual Verification** - Complex features require manual testing
+
+### Quality Gates
+Code must pass the following quality gates before merging:
+```bash
+# Format checking
+black --check .
+ruff check .
+
+# Type checking
+mypy .
+
+# Testing
+pytest --cov=src tests/
+
+# Security checks
+bandit -r src/
+```
+
+### Environment Standards
+1. **Development Environment** - Use `uv` for Python package management
+2. **Virtual Environments** - Use `.venv` for isolated environments
+3. **Configuration** - Never commit sensitive configuration
+4. **Dependencies** - Keep dependencies minimal and secure
+
+## Team Coordination
+
+### Communication Standards
+1. **Issue Tracking** - Use GitHub Issues for bug reports and feature requests
+2. **Project Management** - Use GitHub Projects for task tracking
+3. **Documentation** - Keep documentation updated with code changes
+4. **Knowledge Sharing** - Regular code reviews and architecture discussions
+
+### Development Phases
+BlockMe follows a 5-phase development approach:
+1. **Phase 1**: MVP with basic document processing
+2. **Phase 2**: Enhanced LLM integration and user interface
+3. **Phase 3**: Advanced knowledge base features
+4. **Phase 4**: Multi-jurisdiction tax support
+5. **Phase 5**: Enterprise features and optimizations
+
+### Code Ownership
+1. **Primary Developers** - Designated developers for major components
+2. **Knowledge Sharing** - Cross-training to avoid single points of failure
+3. **Documentation** - Critical components must have comprehensive documentation
+4. **Onboarding** - New developers need proper onboarding with code walkthroughs
+
+## Related Skills
+- **[workflow-policies](workflow-policies)** - Specific workflow rules and approval processes
+- **[backend-development](backend-development)** - Backend-specific development standards
+- **[frontend-development](frontend-development)** - Frontend-specific development standards
+- **[testing-strategy](testing-strategy)** - Comprehensive testing guidelines
+- **[configuration-management](configuration-management)** - Configuration and environment management
+
+## Usage Hints
+Trigger this skill when:
+- Needing to understand project development standards
+- Onboarding new developers
+- Making decisions about coding conventions
+- Looking for specific development guidelines
+- Needing navigation to specialized policies
+- Reviewing code for compliance with standards
+
+## Quality Checklist
+Before committing code, verify:
+- [ ] All identifiers use English
+- [ ] User interface text is in English
+- [ ] API responses are in English
+- [ ] Log messages are in English
+- [ ] Type hints are present and correct
+- [ ] Error handling is proper
+- [ ] Async patterns are used for I/O
+- [ ] Tests are written for new functionality
+- [ ] Documentation is updated
+- [ ] Quality gates pass (`black`, `ruff`, `mypy`, `pytest`)

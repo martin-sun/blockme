@@ -1,0 +1,281 @@
+# Workflow Policies
+
+## Overview
+This skill defines the workflow policies and approval processes for the BlockMe project. It ensures consistent development practices, proper change management, and alignment with the 5-phase development plan.
+
+## Core Workflow Rules
+
+### Rule-01: Plan Approval Required
+**For any of the following changes, a formal plan must be created and approved before implementation:**
+
+- **New Features**: Any new functionality beyond bug fixes
+- **API Changes**: Modifications to existing API endpoints or data structures
+- **Architecture Modifications**: Changes to system architecture or major components
+- **Database Schema Changes**: Any modifications to database structure
+- **LLM Integration Changes**: New LLM providers or major prompt changes
+- **Frontend Route Changes**: New pages or major navigation changes
+
+**Plan Approval Process:**
+1. Create detailed implementation plan (see template below)
+2. Submit for review in GitHub issue or PR
+3. Wait for approval from project maintainer
+4. Only proceed with implementation after approval
+
+### Rule-02: Single-Task Focus
+**Maintain focus on the current task:**
+
+- **Primary Task**: Focus on the approved feature/fix
+- **Record Issues**: Document unrelated issues found but don't fix them immediately
+- **Create Issues**: File separate issues for discovered problems
+- **Avoid Scope Creep**: Don't expand task scope without creating new plan
+
+**Example:**
+```
+While fixing document upload bug, you discover performance issue with search.
+✅ Do: Fix upload bug, create issue for search performance, mention in PR
+❌ Don't: Fix both upload bug and search performance in same PR
+```
+
+### Rule-03: Development Stage Breaking Changes
+**During development stages, backward compatibility is not required:**
+
+- **No API Versioning**: API can change without maintaining old versions
+- **Database Migrations**: Can be destructive during development
+- **Frontend Breaking**: UI components can change without backward compatibility
+- **Configuration Changes**: Config structure can change freely
+
+**Exception**: If explicitly stated in requirements, maintain compatibility for specific features.
+
+### Rule-04: Phase-Based Development
+**Follow the 5-phase development plan:**
+
+**Phase 1: MVP Foundation**
+- Basic document upload and processing
+- Simple LLM integration for tax Q&A
+- Core UI components
+- Basic knowledge base functionality
+
+**Phase 2: Enhanced Integration**
+- Advanced LLM features with vision API
+- Improved UI/UX with Material Design 3
+- Better document processing pipeline
+- User management and preferences
+
+**Phase 3: Knowledge Base Advanced**
+- Semantic search capabilities
+- Document relationships and context
+- Advanced tax reasoning
+- Performance optimizations
+
+**Phase 4: Multi-Jurisdiction**
+- Support for multiple tax jurisdictions
+- Province-specific tax rules
+- Multi-currency support
+- Compliance features
+
+**Phase 5: Enterprise Features**
+- Advanced analytics and reporting
+- Bulk document processing
+- API for third-party integration
+- Advanced security features
+
+### Rule-05: Quality Gates Compliance
+**All code must pass quality gates before merge:**
+
+```bash
+# Required quality checks
+uv run black --check .          # Code formatting
+uv run ruff check .             # Linting and code quality
+uv run mypy .                   # Type checking
+uv run pytest --cov=src tests/ # Testing with coverage
+```
+
+### Rule-06: Documentation Requirements
+**Documentation must be updated with code changes:**
+
+- **API Changes**: Update OpenAPI documentation
+- **New Features**: Update relevant documentation files
+- **Architecture Changes**: Update architecture documentation
+- **Configuration Changes**: Update configuration documentation
+- **User-Facing Changes**: Update user documentation
+
+### Rule-07: Environment Management
+**Follow proper environment management:**
+
+- **Development**: Use `uv` for package management
+- **Virtual Environment**: Use `.venv` directory
+- **Environment Variables**: Never commit `.env` files
+- **Dependencies**: Keep `pyproject.toml` updated
+
+### Rule-08: Testing Requirements
+**Testing requirements based on change type:**
+
+- **Bug Fixes**: Tests that verify the fix and prevent regression
+- **New Features**: Unit tests and integration tests
+- **API Changes**: Integration tests for affected endpoints
+- **UI Changes**: Manual test plan for user workflows
+- **Performance Changes**: Performance benchmarks
+
+## Plan Template
+
+Use this template for any change requiring approval:
+
+```markdown
+## Implementation Plan: [Feature/Change Name]
+
+### Objectives
+- Clear statement of what will be implemented
+- Success criteria and expected outcomes
+- Alignment with project goals
+
+### Impact Scope
+- **Backend Changes**: Number of new API endpoints, database changes
+- **Frontend Changes**: New pages, components, route changes
+- **LLM Integration**: New prompts, providers, or processing changes
+- **Configuration**: Environment variables, config structure changes
+- **Documentation**: Required documentation updates
+
+### Implementation Steps
+1. [ ] Step 1 description
+2. [ ] Step 2 description
+3. [ ] Step 3 description
+...
+
+### Risk Assessment
+- **Technical Risks**: Potential technical challenges
+- **LLM Risks**: Risks related to LLM integration
+- **Performance Impact**: Expected performance implications
+- **User Impact**: How changes affect user experience
+
+### Testing Strategy
+- **Unit Tests**: What will be tested at unit level
+- **Integration Tests**: API and integration testing approach
+- **Manual Testing**: User workflows that need manual verification
+- **Performance Testing**: If performance changes are expected
+
+### Approval Request
+- **Change Type**: [New Feature / API Change / Architecture Change / Other]
+- **Phase**: [Phase 1 / Phase 2 / Phase 3 / Phase 4 / Phase 5]
+- **Priority**: [High / Medium / Low]
+- **Estimated Effort**: [Small / Medium / Large]
+
+Requesting approval from: [@maintainer]
+```
+
+## Change Categories
+
+### Category A: No Approval Required
+- **Bug Fixes**: Simple bug fixes with no API/architecture changes
+- **Documentation**: Documentation updates only
+- **Test Improvements**: Adding or improving tests
+- **Code Refactoring**: Internal code improvements without external changes
+- **Performance Tweaks**: Minor performance optimizations
+
+### Category B: Simple Approval Required
+- **New API Endpoints**: Adding new endpoints without changing existing ones
+- **New UI Pages**: Adding new pages without changing navigation structure
+- **Configuration Changes**: Adding new config options
+- **LLM Prompts**: Minor prompt improvements for existing functionality
+
+### Category C: Full Plan Approval Required
+- **API Changes**: Modifying existing API endpoints
+- **Architecture Changes**: Changes to system architecture
+- **Database Schema Changes**: Modifications to database structure
+- **New LLM Integration**: Adding new LLM providers or major integration changes
+- **Frontend Structure Changes**: Major navigation or component architecture changes
+
+## Development Workflow
+
+### 1. Task Identification
+- Identify task category (A, B, or C)
+- Category A: Proceed directly with implementation
+- Category B: Create simple plan, get approval
+- Category C: Create detailed plan, get approval
+
+### 2. Implementation
+- Follow approved plan exactly
+- Create feature branch from main
+- Implement changes incrementally
+- Run quality checks regularly
+
+### 3. Testing
+- Write tests during implementation
+- Run automated tests
+- Perform manual testing for UI changes
+- Update documentation
+
+### 4. Code Review
+- Create pull request
+- Self-review before requesting review
+- Address reviewer feedback
+- Ensure all quality gates pass
+
+### 5. Merge
+- Get approval from maintainer
+- Merge to main branch
+- Update project tracking
+- Notify team of changes
+
+## Quality Assurance
+
+### Pre-Commit Checklist
+- [ ] Code follows project standards
+- [ ] All quality gates pass
+- [ ] Tests are written and passing
+- [ ] Documentation is updated
+- [ ] No sensitive data committed
+- [ ] Implementation matches approved plan
+
+### Post-Merge Verification
+- [ ] Deployed to staging environment
+- [ ] Manual testing performed
+- [ ] Performance verified (if applicable)
+- [ ] User documentation updated
+- [ ] Team notified of changes
+
+## Related Skills
+- **[development-policies](development-policies)** - General development standards
+- **[testing-strategy](testing-strategy)** - Comprehensive testing guidelines
+- **[configuration-management](configuration-management)** - Configuration management
+- **[core-architecture](core-architecture)** - System architecture principles
+
+## Usage Hints
+Trigger this skill when:
+- Planning new features or changes
+- Determining if approval is required
+- Creating implementation plans
+- Understanding development workflow
+- Reviewing code for compliance
+- Managing project phases and releases
+
+## Examples
+
+### Example 1: Bug Fix (Category A)
+```
+Fix: Document upload fails for large files
+- Type: Bug fix
+- Approval: Not required
+- Implementation: Fix file size handling, add tests
+```
+
+### Example 2: New API Endpoint (Category B)
+```
+Feature: Add document search API endpoint
+- Type: New functionality
+- Approval: Simple approval required
+- Plan: New GET /api/documents/search endpoint
+```
+
+### Example 3: Database Schema Change (Category C)
+```
+Feature: Add document metadata tracking
+- Type: Architecture change
+- Approval: Full plan required
+- Plan: New tables, migration script, API changes
+```
+
+## Enforcement
+- **Code Review**: Enforce compliance during code review
+- **CI/CD**: Automated checks for quality gates
+- **Project Management**: Track approval status in GitHub
+- **Team Communication**: Regular reminders about workflow policies

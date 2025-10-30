@@ -1,0 +1,727 @@
+# Tax Standards
+
+## Overview
+This skill defines the tax domain standards and conventions for BlockMe, focusing on Canadian tax system knowledge, document categorization, tax jurisdiction rules, and standardized data structures for tax information processing.
+
+## Canadian Tax System Fundamentals
+
+### 1. Tax Jurisdiction Structure
+Canada has a multi-layered tax system that BlockMe must understand and handle:
+
+```python
+# ✅ GOOD - Clear tax jurisdiction hierarchy
+# app/models/tax.py
+
+from enum import Enum
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+
+class TaxJurisdiction(str, Enum):
+    """Canadian tax jurisdictions."""
+    FEDERAL = "federal"
+    ALBERTA = "ab"
+    BRITISH_COLUMBIA = "bc"
+    MANITOBA = "mb"
+    NEW_BRUNSWICK = "nb"
+    NEWFOUNDLAND = "nl"
+    NORTHWEST_TERRITORIES = "nt"
+    NOVA_SCOTIA = "ns"
+    NUNAVUT = "nu"
+    ONTARIO = "on"
+    PRINCE_EDWARD_ISLAND = "pe"
+    QUEBEC = "qc"
+    SASKATCHEWAN = "sk"
+    YUKON = "yt"
+
+class TaxType(str, Enum):
+    """Types of taxes in Canadian system."""
+    INCOME_TAX = "income_tax"          # Federal and provincial income tax
+    GST = "gst"                        # Goods and Services Tax (5%)
+    HST = "hst"                        # Harmonized Sales Tax
+    PST = "pst"                        # Provincial Sales Tax
+    PROPERTY_TAX = "property_tax"      # Municipal property tax
+    PAYROLL_TAX = "payroll_tax"        # CPP, EI
+    EXCISE_TAX = "excise_tax"          # Fuel, alcohol, tobacco
+
+@dataclass
+class TaxRates:
+    """Tax rates for a specific jurisdiction and year."""
+    jurisdiction: TaxJurisdiction
+    tax_year: int
+    federal_rate: float
+    provincial_rate: float
+    gst_rate: float = 0.05
+    hst_rate: Optional[float] = None
+    pst_rate: Optional[float] = None
+
+    @property
+    def combined_rate(self) -> float:
+        """Combined federal and provincial income tax rate."""
+        return self.federal_rate + self.provincial_rate
+
+    @property
+    def sales_tax_rate(self) -> float:
+        """Total sales tax rate (GST/HST + PST if applicable)."""
+        if self.hst_rate:
+            return self.hst_rate
+        return self.gst_rate + (self.pst_rate or 0)
+```
+
+### 2. Document Type Classification
+BlockMe must properly classify tax-related documents:
+
+```python
+# ✅ GOOD - Comprehensive document categorization
+class TaxDocumentType(str, Enum):
+    """Standard tax document types."""
+
+    # Personal Tax Returns
+    T1_GENERAL = "t1_general"                    # Main personal tax return
+    T1_ADJUSTMENT = "t1_adjustment"              # T1 Adjustment request
+    T1013 = "t1013"                              # Authorization form
+    TAX_RECEIPT = "tax_receipt"                  # Official tax receipt
+
+    # Income Reporting Slips
+    T4 = "t4"                                    # Employment income
+    T4A = "t4a"                                  # Pension, retirement, annuity income
+    T4E = "t4e"                                  # Employment insurance benefits
+    T5 = "t5"                                    # Investment income
+    T3 = "t3"                                    # Mutual fund income
+    T5007 = "t5007"                              # Social assistance benefits
+    T2202 = "t2202"                              # Tuition and enrolment certificate
+    T4A_NRC = "t4a_nrc"                          # Non-resident Canada
+    T5018 = "t5018"                              # Statement of contract payments
+
+    # Business Documents
+    T2125 = "t2125"                              # Statement of business activities
+    T777 = "t777"                                # Statement of rental income
+    T2038 = "t2038"                              # Investment income limit
+    T1135 = "t1135"                              # Foreign income verification
+    GST34 = "gst34"                              # GST/HST return
+    T2121 = "t2121"                              # Foreign asset verification
+
+    # Corporate Documents
+    T2 = "t2"                                    # Corporate tax return
+    T2SCH1 = "t2sch1"                            # Net income
+    T2SCH50 = "t2sch50"                          # Capital cost allowance
+    T117 = "t117"                                # Foreign property
+    T1139 = "t1139"                              # Related party transactions
+
+    # Business Records
+    INVOICE = "invoice"                          # Sales invoice
+    RECEIPT = "receipt"                          # Purchase receipt
+    EXPENSE_REPORT = "expense_report"            # Employee expense report
+    BANK_STATEMENT = "bank_statement"            # Bank records
+    CREDIT_CARD_STATEMENT = "credit_card_statement"  # Credit card records
+    LEASE_AGREEMENT = "lease_agreement"          # Vehicle/property lease
+    INSURANCE_POLICY = "insurance_policy"        # Business insurance
+
+    # Property Documents
+    PROPERTY_TAX_ASSESSMENT = "property_tax_assessment"  # Municipal assessment
+    MORTGAGE_STATEMENT = "mortgage_statement"    # Mortgage interest
+    RENTAL_AGREEMENT = "rental_agreement"        # Rental contract
+    UTILITY_BILLS = "utility_bills"              # Hydro, water, gas
+
+    # Investment Documents
+    TRADING_SUMMARY = "trading_summary"          # Brokerage statements
+    DIVIDEND_STATEMENTS = "dividend_statements"  # Dividend income
+    INTEREST_STATEMENTS = "interest_statements"  # Bank/investment interest
+    CAPITAL_GAINS_SCHEDULE = "capital_gains_schedule"  # Schedule 3
+
+    # Other Tax Documents
+    NOTICE_ASSESSMENT = "notice_assessment"      # CRA notice of assessment
+    NOTICE_REASSESSMENT = "notice_reassessment"  # CRA notice of reassessment
+    TAX_CREDIT_APPLICATION = "tax_credit_application"  # Credit applications
+    PROPERTY_TRANSFER_TAX = "property_transfer_tax"   # Real estate transfer
+
+@dataclass
+class TaxDocument:
+    """Tax document with classification metadata."""
+    document_type: TaxDocumentType
+    tax_year: int
+    jurisdiction: TaxJurisdiction
+    document_date: date
+    taxpayer_info: TaxpayerInfo
+    amounts: Dict[str, float]
+    metadata: Dict[str, Any]
+
+    def get_filing_deadline(self) -> date:
+        """Get filing deadline for this document type."""
+        if self.document_type in [TaxDocumentType.T1_GENERAL, TaxDocumentType.T2]:
+            # Personal returns: April 30, self-employed: June 15
+            return date(self.tax_year, 4, 30)
+        # Other document types have different deadlines
+        return self._calculate_document_deadline()
+
+    def get_currency(self) -> str:
+        """Get currency of the document."""
+        return self.metadata.get('currency', 'CAD')
+```
+
+### 3. Taxpayer Information Structure
+```python
+# ✅ GOOD - Standardized taxpayer information
+@dataclass
+class TaxpayerInfo:
+    """Standard taxpayer information structure."""
+    sin: Optional[str] = None                     # Social Insurance Number
+    business_number: Optional[str] = None         # Business Number
+    gst_hst_number: Optional[str] = None          # GST/HST registration number
+    corporation_number: Optional[str] = None      # Corporation identifier
+
+    # Personal Information
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    marital_status: Optional[str] = None
+
+    # Address Information
+    address: Optional[str] = None
+    city: Optional[str] = None
+    province: Optional[TaxJurisdiction] = None
+    postal_code: Optional[str] = None
+    country: str = "Canada"
+
+    # Business Information
+    business_name: Optional[str] = None
+    business_type: Optional[str] = None          # Sole proprietor, corporation, etc.
+    fiscal_year_end: Optional[date] = None
+    industry_code: Optional[str] = None          # NAICS code
+
+    @property
+    def is_business(self) -> bool:
+        """Check if this is a business taxpayer."""
+        return self.business_number is not None or self.business_name is not None
+
+    @property
+    def full_name(self) -> str:
+        """Get full name for individual taxpayers."""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        return self.business_name or "Unknown Taxpayer"
+
+    def validate_sin(self) -> bool:
+        """Validate Social Insurance Number format."""
+        if not self.sin or len(self.sin.replace(' ', '')) != 9:
+            return False
+        # Add SIN validation logic here
+        return True
+```
+
+## Tax Knowledge Base Structure
+
+### 1. Tax Topic Hierarchy
+```python
+# ✅ GOOD - Structured tax knowledge organization
+class TaxTopic(Enum):
+    """Main tax knowledge topics."""
+
+    # Income Tax
+    EMPLOYMENT_INCOME = "employment_income"
+    SELF_EMPLOYMENT_INCOME = "self_employment_income"
+    INVESTMENT_INCOME = "investment_income"
+    RENTAL_INCOME = "rental_income"
+    CAPITAL_GAINS = "capital_gains"
+    OTHER_INCOME = "other_income"
+
+    # Deductions
+    EMPLOYMENT_EXPENSES = "employment_expenses"
+    BUSINESS_EXPENSES = "business_expenses"
+    RENTAL_EXPENSES = "rental_expenses"
+    INVESTMENT_EXPENSES = "investment_expenses"
+    MOVING_EXPENSES = "moving_expenses"
+    CHILD_CARE_EXPENSES = "child_care_expenses"
+
+    # Tax Credits
+    PERSONAL_CREDITS = "personal_credits"
+    FAMILY_CREDITS = "family_credits"
+    MEDICAL_EXPENSES = "medical_expenses"
+    CHARITABLE_DONATIONS = "charitable_donations"
+    EDUCATION_CREDITS = "education_credits"
+
+    # Sales Tax
+    GST_HST_REGISTRATION = "gst_hst_registration"
+    INPUT_TAX_CREDITS = "input_tax_credits"
+    PST_COMPLIANCE = "pst_compliance"
+    SALES_TAX_RATES = "sales_tax_rates"
+
+    # Payroll
+    CPP_CONTRIBUTIONS = "cpp_contributions"
+    EI_PREMIUMS = "ei_premiums"
+    PAYROLL_DEDUCTIONS = "payroll_deductions"
+    T4_FILING = "t4_filing"
+
+    # Corporate Tax
+    CORPORATE_INCOME = "corporate_income"
+    CAPITAL_COST_ALLOWANCE = "capital_cost_allowance"
+    SCIENTIFIC_RESEARCH_EXPERIMENTAL_DEVELOPMENT = "sred"
+    CORPORATE_CREDITS = "corporate_credits"
+
+    # Compliance
+    FILING_REQUIREMENTS = "filing_requirements"
+    RECORD_KEEPING = "record_keeping"
+    AUDIT_PROTECTION = "audit_protection"
+    OBJECTIONS_APPEALS = "objections_appeals"
+
+@dataclass
+class TaxRule:
+    """Tax rule with metadata."""
+    topic: TaxTopic
+    jurisdiction: TaxJurisdiction
+    tax_year: int
+    rule_description: str
+    conditions: List[str]
+    calculation_method: Optional[str] = None
+    references: List[str] = None
+    examples: List[str] = None
+    related_topics: List[TaxTopic] = None
+
+    def is_applicable(self, context: Dict[str, Any]) -> bool:
+        """Check if this rule applies to given context."""
+        # Implementation for rule applicability logic
+        return True
+```
+
+### 2. Tax Calculation Standards
+```python
+# ✅ GOOD - Standardized tax calculation structures
+@dataclass
+class TaxCalculation:
+    """Standard tax calculation result."""
+
+    # Income Components
+    employment_income: float = 0.0
+    self_employment_income: float = 0.0
+    investment_income: float = 0.0
+    rental_income: float = 0.0
+    capital_gains: float = 0.0
+    other_income: float = 0.0
+
+    # Deductions
+    business_expenses: float = 0.0
+    rrsp_deductions: float = 0.0
+    employment_expenses: float = 0.0
+    moving_expenses: float = 0.0
+    other_deductions: float = 0.0
+
+    # Taxable Income
+    gross_income: float = 0.0
+    total_deductions: float = 0.0
+    taxable_income: float = 0.0
+
+    # Federal Tax
+    federal_tax_payable: float = 0.0
+    federal_tax_credits: float = 0.0
+    federal_tax_after_credits: float = 0.0
+
+    # Provincial/Territorial Tax
+    provincial_tax_payable: float = 0.0
+    provincial_tax_credits: float = 0.0
+    provincial_tax_after_credits: float = 0.0
+
+    # Total Tax
+    total_tax_payable: float = 0.0
+    total_tax_credits: float = 0.0
+    total_tax_after_credits: float = 0.0
+
+    # Payments and Refunds
+    tax_paid: float = 0.0
+    tax_withheld: float = 0.0
+    refund_balance: float = 0.0
+
+    @property
+    def marginal_tax_rate(self) -> float:
+        """Calculate marginal tax rate."""
+        if self.taxable_income <= 0:
+            return 0.0
+        return self.total_tax_payable / self.taxable_income
+
+    @property
+    def average_tax_rate(self) -> float:
+        """Calculate average tax rate."""
+        if self.gross_income <= 0:
+            return 0.0
+        return self.total_tax_payable / self.gross_income
+
+    def validate_calculation(self) -> List[str]:
+        """Validate tax calculation for consistency."""
+        errors = []
+
+        # Check mathematical consistency
+        calculated_gross = (
+            self.employment_income + self.self_employment_income +
+            self.investment_income + self.rental_income + self.other_income
+        )
+        if abs(calculated_gross - self.gross_income) > 0.01:
+            errors.append("Income components don't match gross income")
+
+        calculated_taxable = self.gross_income - self.total_deductions
+        if abs(calculated_taxable - self.taxable_income) > 0.01:
+            errors.append("Taxable income calculation error")
+
+        calculated_total = (
+            self.federal_tax_after_credits + self.provincial_tax_after_credits
+        )
+        if abs(calculated_total - self.total_tax_after_credits) > 0.01:
+            errors.append("Total tax calculation error")
+
+        return errors
+```
+
+## Data Standards and Conventions
+
+### 1. Monetary Amount Standards
+```python
+# ✅ GOOD - Standardized monetary amount handling
+from decimal import Decimal, ROUND_HALF_UP
+
+class MonetaryAmount:
+    """Standardized monetary amount handling."""
+
+    def __init__(self, amount: float | Decimal, currency: str = "CAD"):
+        self.currency = currency.upper()
+        # Store as Decimal for precision
+        self.amount = Decimal(str(amount)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+    def __str__(self) -> str:
+        return f"{self.currency} {self.amount:,.2f}"
+
+    def __add__(self, other: 'MonetaryAmount') -> 'MonetaryAmount':
+        if self.currency != other.currency:
+            raise ValueError("Cannot add amounts in different currencies")
+        return MonetaryAmount(self.amount + other.amount, self.currency)
+
+    def __sub__(self, other: 'MonetaryAmount') -> 'MonetaryAmount':
+        if self.currency != other.currency:
+            raise ValueError("Cannot subtract amounts in different currencies")
+        return MonetaryAmount(self.amount - other.amount, self.currency)
+
+    def __mul__(self, multiplier: float) -> 'MonetaryAmount':
+        return MonetaryAmount(self.amount * Decimal(str(multiplier)), self.currency)
+
+    def to_float(self) -> float:
+        """Convert to float for compatibility."""
+        return float(self.amount)
+
+    @classmethod
+    def from_cents(cls, cents: int, currency: str = "CAD") -> 'MonetaryAmount':
+        """Create from cents."""
+        return cls(cents / 100.0, currency)
+
+# Usage examples
+tax_payable = MonetaryAmount(1542.50, "CAD")
+tax_paid = MonetaryAmount(1800.00, "CAD")
+refund = tax_paid - tax_payable  # CAD 257.50
+```
+
+### 2. Date and Time Standards
+```python
+# ✅ GOOD - Standardized date handling for tax purposes
+from datetime import date, datetime
+from typing import Optional
+
+class TaxYear:
+    """Represents a tax year with standard methods."""
+
+    def __init__(self, year: int):
+        self.year = year
+
+    @property
+    def start_date(self) -> date:
+        """Get start date of tax year (January 1)."""
+        return date(self.year, 1, 1)
+
+    @property
+    def end_date(self) -> date:
+        """Get end date of tax year (December 31)."""
+        return date(self.year, 12, 31)
+
+    @property
+    def personal_filing_deadline(self) -> date:
+        """Get personal tax return filing deadline."""
+        return date(self.year + 1, 4, 30)
+
+    @property
+    def self_employed_filing_deadline(self) -> date:
+        """Get self-employed filing deadline."""
+        return date(self.year + 1, 6, 15)
+
+    def contains_date(self, check_date: date) -> bool:
+        """Check if date falls within this tax year."""
+        return self.start_date <= check_date <= self.end_date
+
+    @classmethod
+    def from_date(cls, transaction_date: date) -> 'TaxYear':
+        """Create TaxYear from any date."""
+        # Tax year follows calendar year in Canada
+        return cls(transaction_date.year)
+
+    @classmethod
+    def current(cls) -> 'TaxYear':
+        """Get current tax year."""
+        return cls(datetime.now().year)
+
+class TaxPeriod:
+    """Represents a tax period (fiscal year, reporting period, etc.)."""
+
+    def __init__(self, start_date: date, end_date: date, period_type: str = "calendar"):
+        self.start_date = start_date
+        self.end_date = end_date
+        self.period_type = period_type
+
+    @property
+    def duration_days(self) -> int:
+        """Get duration in days."""
+        return (self.end_date - self.start_date).days + 1
+
+    def contains_date(self, check_date: date) -> bool:
+        """Check if date falls within this period."""
+        return self.start_date <= check_date <= self.end_date
+
+    @classmethod
+    def fiscal_year(cls, year: int, year_end: int = 12) -> 'TaxPeriod':
+        """Create fiscal year period."""
+        start_date = date(year - 1, year_end + 1, 1)
+        end_date = date(year, year_end, 31)
+        return cls(start_date, end_date, "fiscal")
+```
+
+### 3. Document Reference Standards
+```python
+# ✅ GOOD - Standardized document referencing
+class DocumentReference:
+    """Standardized document reference system."""
+
+    def __init__(
+        self,
+        document_id: str,
+        document_type: TaxDocumentType,
+        tax_year: int,
+        page_number: Optional[int] = None,
+        line_number: Optional[int] = None,
+        section_reference: Optional[str] = None
+    ):
+        self.document_id = document_id
+        self.document_type = document_type
+        self.tax_year = tax_year
+        self.page_number = page_number
+        self.line_number = line_number
+        self.section_reference = section_reference
+
+    def __str__(self) -> str:
+        """Generate human-readable reference."""
+        ref_parts = [
+            self.document_type.value.upper(),
+            str(self.tax_year),
+            self.document_id[-8:]  # Last 8 chars of ID
+        ]
+
+        if self.page_number:
+            ref_parts.append(f"p{self.page_number}")
+
+        if self.line_number:
+            ref_parts.append(f"l{self.line_number}")
+
+        return ":".join(ref_parts)
+
+    @classmethod
+    def from_string(cls, reference_string: str) -> 'DocumentReference':
+        """Parse reference string back to object."""
+        # Implementation for parsing reference strings
+        pass
+
+# Example references
+# T1_GENERAL:2024:ABC12345:p1:l15
+# T4:2024:XYZ67890:p1
+# INVOICE:2024:DEF98765
+```
+
+## Naming Conventions
+
+### 1. Database Schema Standards
+```sql
+-- ✅ GOOD - Standardized database naming conventions
+-- Table names: snake_case, plural
+-- Column names: snake_case
+-- Foreign keys: {table}_id
+-- Indexes: idx_{table}_{column(s)}
+
+-- Core tables
+CREATE TABLE taxpayers (
+    taxpayer_id UUID PRIMARY KEY,
+    sin VARCHAR(11) UNIQUE,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    business_number VARCHAR(15),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE documents (
+    document_id UUID PRIMARY KEY,
+    taxpayer_id UUID REFERENCES taxpayers(taxpayer_id),
+    document_type VARCHAR(50) NOT NULL,
+    tax_year INTEGER NOT NULL,
+    jurisdiction VARCHAR(10) NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size BIGINT NOT NULL,
+    mime_type VARCHAR(100) NOT NULL,
+    status VARCHAR(20) DEFAULT 'uploaded',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    processed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE tax_calculations (
+    calculation_id UUID PRIMARY KEY,
+    taxpayer_id UUID REFERENCES taxpayers(taxpayer_id),
+    tax_year INTEGER NOT NULL,
+    calculation_type VARCHAR(50) NOT NULL,
+    gross_income DECIMAL(15,2) NOT NULL,
+    total_deductions DECIMAL(15,2) NOT NULL,
+    taxable_income DECIMAL(15,2) NOT NULL,
+    federal_tax DECIMAL(15,2) NOT NULL,
+    provincial_tax DECIMAL(15,2) NOT NULL,
+    total_tax DECIMAL(15,2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for performance
+CREATE INDEX idx_documents_taxpayer_year ON documents(taxpayer_id, tax_year);
+CREATE INDEX idx_documents_type_year ON documents(document_type, tax_year);
+CREATE INDEX idx_tax_calculations_taxpayer_year ON tax_calculations(taxpayer_id, tax_year);
+```
+
+### 2. API Endpoint Standards
+```python
+# ✅ GOOD - RESTful API naming conventions
+
+# Document endpoints
+GET    /api/v1/documents                    # List documents
+POST   /api/v1/documents                    # Upload document
+GET    /api/v1/documents/{document_id}      # Get specific document
+PUT    /api/v1/documents/{document_id}      # Update document
+DELETE /api/v1/documents/{document_id}      # Delete document
+
+# Tax calculation endpoints
+POST   /api/v1/tax/calculations             # Create tax calculation
+GET    /api/v1/tax/calculations/{calc_id}   # Get calculation result
+GET    /api/v1/tax/calculations             # List calculations
+
+# Tax Q&A endpoints
+POST   /api/v1/tax/questions                 # Ask tax question
+GET    /api/v1/tax/questions/{question_id}   # Get question and answer
+GET    /api/v1/tax/questions                 # List question history
+
+# Taxpayer endpoints
+GET    /api/v1/taxpayers/{taxpayer_id}       # Get taxpayer info
+PUT    /api/v1/taxpayers/{taxpayer_id}       # Update taxpayer info
+```
+
+## Quality Standards
+
+### 1. Data Validation Rules
+```python
+# ✅ GOOD - Comprehensive data validation
+class TaxDataValidator:
+    """Validates tax-related data for accuracy and completeness."""
+
+    @staticmethod
+    def validate_sin(sin: str) -> bool:
+        """Validate Social Insurance Number."""
+        # Remove spaces
+        clean_sin = sin.replace(' ', '')
+
+        # Check length
+        if len(clean_sin) != 9:
+            return False
+
+        # Check if all digits
+        if not clean_sin.isdigit():
+            return False
+
+        # SIN validation algorithm (Luhn's algorithm)
+        # Implementation here
+
+        return True
+
+    @staticmethod
+    def validate_business_number(bn: str) -> bool:
+        """Validate Business Number."""
+        # BN is 15 digits: 9-digit registration number + 2-character program identifier + 4-digit reference number
+        clean_bn = bn.replace(' ', '')
+
+        if len(clean_bn) != 15:
+            return False
+
+        # First 9 digits should be numeric
+        if not clean_bn[:9].isdigit():
+            return False
+
+        return True
+
+    @staticmethod
+    def validate_tax_year(tax_year: int) -> bool:
+        """Validate tax year."""
+        current_year = datetime.now().year
+        min_year = 2015  # Reasonable minimum
+
+        return min_year <= tax_year <= current_year + 1  # Allow next year
+
+    @staticmethod
+    def validate_postal_code(postal_code: str, province: Optional[str] = None) -> bool:
+        """Validate Canadian postal code."""
+        # Remove spaces
+        clean_pc = postal_code.upper().replace(' ', '')
+
+        # Check format: A1A1A1
+        if len(clean_pc) != 6:
+            return False
+
+        # Check pattern
+        pattern = r'^[A-Z]\d[A-Z]\d[A-Z]\d$'
+        if not re.match(pattern, clean_pc):
+            return False
+
+        # Optional: Validate against province if provided
+        if province:
+            return TaxDataValidator._validate_postal_code_province(clean_pc, province)
+
+        return True
+
+    @staticmethod
+    def validate_monetary_amount(amount: float) -> bool:
+        """Validate monetary amount."""
+        # Amount should be non-negative for most tax purposes
+        return amount >= 0 and amount < 10**12  # Reasonable upper limit
+```
+
+## Related Skills
+- **[core-architecture](core-architecture)** - System architecture patterns
+- **[configuration-management](configuration-management)** - Tax configuration
+- **[llm-usage-guide](llm-usage-guide)** - LLM tax knowledge processing
+- **[backend-development](backend-development)** - Tax calculation implementation
+- **[testing-strategy](testing-strategy)** - Tax calculation testing
+
+## Usage Hints
+Trigger this skill when:
+- Designing tax document processing
+- Implementing tax calculations
+- Structuring tax knowledge base
+- Creating tax-related APIs
+- Validating tax data
+- Setting up tax database schema
+- Implementing tax form recognition
+- Planning tax compliance features
+
+## Quality Checklist
+- [ ] Document types follow Canadian tax standards
+- [ ] Jurisdiction handling is complete and accurate
+- [ ] Tax calculations are mathematically sound
+- [ ] Data validation includes all tax-specific rules
+- [ ] Naming conventions follow tax domain standards
+- [ ] Currency handling uses proper precision
+- [ ] Date handling follows tax year conventions
+- [ ] Document references are consistent and traceable
+- [ ] Database schema supports tax audit requirements
+- [ ] API endpoints follow RESTful tax domain conventions

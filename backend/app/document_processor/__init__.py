@@ -9,6 +9,7 @@ Main Modules:
 - skill_generator: Generate Skill files (Markdown + YAML)
 - markdown_optimizer: AI content enhancement
 - quality_validator: Quality validation
+- llm_cli_providers: LLM CLI provider abstraction (Claude, Gemini, Codex)
 """
 
 # PDF Extraction
@@ -56,6 +57,16 @@ from .quality_validator import (
     validate_skill_content
 )
 
+# LLM CLI Providers
+from .llm_cli_providers import (
+    LLMCLIProvider,
+    ClaudeCLIProvider,
+    GeminiCLIProvider,
+    CodexCLIProvider,
+    get_provider,
+    detect_available_providers
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -89,4 +100,11 @@ __all__ = [
     "ValidationIssue",
     "validate_skill_file",
     "validate_skill_content",
+    # LLM CLI Providers
+    "LLMCLIProvider",
+    "ClaudeCLIProvider",
+    "GeminiCLIProvider",
+    "CodexCLIProvider",
+    "get_provider",
+    "detect_available_providers",
 ]

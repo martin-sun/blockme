@@ -92,6 +92,7 @@ class SkillGenerator:
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.max_skill_lines = 500  # Claude Skills best practice
 
     def generate_skill(
         self,
@@ -167,7 +168,7 @@ class SkillGenerator:
         subdirectory: Optional[str] = None
     ) -> Path:
         """
-        Save Skill to file.
+        Save Skill to file (legacy single-file mode).
 
         Args:
             skill: Skill content
@@ -196,6 +197,251 @@ class SkillGenerator:
 
         logger.info(f"Skill saved: {file_path}")
         return file_path
+
+    def save_skill_directory(
+        self,
+        skill_id: str,
+        raw_text: str,
+        reference_chunks: List[dict],
+        metadata: SkillMetadata,
+        subdirectory: Optional[str] = None
+    ) -> Path:
+        """
+        Save skill as directory structure (Skill_Seekers pattern).
+
+        Creates:
+        - skill_id/
+          - SKILL.md (lightweight index)
+          - references/
+            - index.md (navigation)
+            - {chunk-slug}.md (enhanced content)
+          - raw/
+            - full-extract.txt (original text)
+
+        Args:
+            skill_id: Skill identifier
+            raw_text: Original extracted text
+            reference_chunks: List of enhanced chunks with metadata
+            metadata: Skill metadata
+            subdirectory: Optional parent subdirectory
+
+        Returns:
+            Path to skill directory
+        """
+        # Create skill directory
+        if subdirectory:
+            skill_dir = self.output_dir / subdirectory / skill_id
+        else:
+            skill_dir = self.output_dir / skill_id
+
+        skill_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create subdirectories
+        (skill_dir / "references").mkdir(exist_ok=True)
+        (skill_dir / "raw").mkdir(exist_ok=True)
+
+        # 1. Save raw text
+        self._save_raw_text(skill_dir / "raw" / "full-extract.txt", raw_text)
+
+        # 2. Save reference chunks
+        reference_files = []
+        for chunk in reference_chunks:
+            ref_path = self._save_reference_file(
+                skill_dir / "references",
+                chunk['slug'],
+                chunk['title'],
+                chunk['content'],
+                chunk['chapter_num']
+            )
+            reference_files.append({
+                'path': ref_path.name,
+                'title': chunk['title'],
+                'chapter_num': chunk['chapter_num']
+            })
+
+        # 3. Generate references/index.md
+        self._create_reference_index(
+            skill_dir / "references" / "index.md",
+            reference_files,
+            metadata
+        )
+
+        # 4. Generate SKILL.md
+        self._create_skill_index(
+            skill_dir / "SKILL.md",
+            metadata,
+            reference_files,
+            len(raw_text)
+        )
+
+        logger.info(f"Skill directory created: {skill_dir}")
+        return skill_dir
+
+    def _save_raw_text(self, file_path: Path, content: str) -> None:
+        """Save raw extracted text."""
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        logger.info(f"Raw text saved: {file_path}")
+
+    def _save_reference_file(
+        self,
+        references_dir: Path,
+        slug: str,
+        title: str,
+        content: str,
+        chapter_num: int
+    ) -> Path:
+        """Save a single reference file."""
+        file_path = references_dir / f"{slug}.md"
+
+        # Format reference file content
+        formatted_content = f"""# {title}
+
+**Chapter {chapter_num}**
+
+---
+
+{content}
+"""
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(formatted_content)
+
+        logger.info(f"Reference file saved: {file_path}")
+        return file_path
+
+    def _create_reference_index(
+        self,
+        index_path: Path,
+        reference_files: List[dict],
+        metadata: SkillMetadata
+    ) -> None:
+        """Create references/index.md navigation file."""
+        content = f"""# {metadata.title} - Reference Index
+
+**Source:** {metadata.source}
+**Category:** {metadata.category}
+**Quality:** {metadata.quality_grade}
+
+---
+
+## Available References
+
+This documentation is organized into the following sections:
+
+"""
+
+        # Add table of contents
+        for ref in sorted(reference_files, key=lambda x: x['chapter_num']):
+            content += f"{ref['chapter_num']}. **[{ref['title']}]({ref['path']})** \n"
+
+        content += f"""
+---
+
+**Total Chapters:** {len(reference_files)}
+
+**Navigation:**
+- Return to [SKILL.md](../SKILL.md)
+- View [raw extracted text](../raw/full-extract.txt)
+"""
+
+        with open(index_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        logger.info(f"Reference index created: {index_path}")
+
+    def _create_skill_index(
+        self,
+        skill_path: Path,
+        metadata: SkillMetadata,
+        reference_files: List[dict],
+        raw_text_size: int
+    ) -> None:
+        """Create SKILL.md lightweight index file."""
+        # Generate YAML front matter
+        yaml_content = yaml.dump(
+            metadata.model_dump(exclude_none=True),
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False
+        )
+
+        content = f"""---
+{yaml_content}---
+
+# {metadata.title}
+
+{metadata.description}
+
+---
+
+## 📖 When to Use This Skill
+
+Use this skill when you need information about:
+{self._generate_use_cases(metadata)}
+
+---
+
+## 📚 Reference Documentation
+
+This skill contains {len(reference_files)} reference chapters:
+
+"""
+
+        # Add compact table of contents
+        for ref in sorted(reference_files, key=lambda x: x['chapter_num']):
+            content += f"{ref['chapter_num']}. [{ref['title']}](references/{ref['path']})\n"
+
+        content += f"""
+**[View Full Index](references/index.md)** | **[Raw Text](raw/full-extract.txt)** ({raw_text_size:,} chars)
+
+---
+
+## 🏷️ Tags
+
+{', '.join(f'`{tag}`' for tag in metadata.tags)}
+
+---
+
+## 📊 Quality Information
+
+- **Grade:** {metadata.quality_grade}
+- **Priority:** {metadata.priority}
+- **Domain:** {metadata.domain}
+- **Source:** {metadata.source}
+
+---
+
+*Generated by BeanFlow CRA Document Processor*
+"""
+
+        with open(skill_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        logger.info(f"SKILL.md index created: {skill_path}")
+
+    def _generate_use_cases(self, metadata: SkillMetadata) -> str:
+        """Generate use cases based on category and tags."""
+        use_cases = []
+
+        # Category-specific use cases
+        category_uses = {
+            "personal_income": "- Personal income tax filing and calculations",
+            "credits": "- Tax credits and rebates\n- Credit eligibility and applications",
+            "deductions": "- Tax deductions and relief programs\n- Deductible expenses",
+            "business_income": "- Business income reporting\n- Corporate tax matters",
+            "gst_hst": "- GST/HST calculations and filing",
+        }
+
+        if metadata.category in category_uses:
+            use_cases.append(category_uses[metadata.category])
+
+        # Tag-based use cases
+        if not use_cases:
+            for tag in metadata.tags[:3]:
+                use_cases.append(f"- {tag}-related tax matters")
+
+        return "\n".join(use_cases) if use_cases else "- Canadian tax information and guidance"
 
     def _generate_skill_id(
         self,

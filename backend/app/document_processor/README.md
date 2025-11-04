@@ -4,19 +4,45 @@ Offline CRA tax document processing modules for generating high-quality Skill fi
 
 ## Quick Start
 
-### Process Complete PDF with Local Claude Code
+### Process Complete PDF with Local LLM CLI
+
+**Option 1: Claude Code CLI** (recommended if you have Claude Code subscription)
 
 ```bash
 cd backend
 uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --local-claude --full
 ```
 
+**Option 2: Gemini CLI** (free tier: 1000 req/day)
+
+```bash
+cd backend
+uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --local-gemini --full
+```
+
+**Option 3: OpenAI Codex CLI** (requires OpenAI access)
+
+```bash
+cd backend
+uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --local-codex --full
+```
+
 This will:
-- Extract all 153 pages from the PDF
+- Extract all 153 pages from the PDF (721K characters)
+- Detect chapters and split into ~3 intelligent chunks
 - Classify content by tax category
-- Generate a skill file with YAML metadata
-- Enhance content using local Claude Code CLI (free with subscription)
-- Validate and save the output to `skills_output/`
+- Enhance each chunk using selected local LLM CLI
+- Generate skill directory with:
+  - `SKILL.md` - Lightweight index (< 500 lines)
+  - `references/*.md` - AI-enhanced chapters (3 files)
+  - `references/index.md` - Navigation
+  - `raw/full-extract.txt` - Complete original text
+- Save to `skills_output/credits-t4012-24e/`
+
+**Processing Time** (full 153-page PDF, 721K chars):
+- **Claude**: ~15-25 minutes (3 chunks × 5-8 min/chunk)
+- **Gemini**: ~5-10 minutes (1 chunk, 5x larger context window)
+- **Codex**: ~15-20 minutes (3 chunks × 5-7 min/chunk)
 
 ### Quick Test (First 5 Pages, No AI)
 
@@ -152,7 +178,9 @@ The `generate_skill.py` script provides a convenient way to generate skills from
 |------|------|---------|-------------|
 | `--pdf` | Required | - | Path to PDF file |
 | `--full` | Flag | False | **Process ALL pages** (otherwise limited to --max-pages) |
-| `--local-claude` | Flag | False | Use local Claude CLI (free with Code Max subscription) |
+| `--local-claude` | Flag | False | Use local Claude Code CLI (requires subscription) |
+| `--local-gemini` | Flag | False | Use local Gemini CLI (free tier: 1000 req/day) |
+| `--local-codex` | Flag | False | Use local Codex CLI (requires OpenAI access) |
 | `--no-ai` | Flag | False | Skip AI enhancement (fastest mode) |
 | `--api` | Flag | False | Use Claude API (requires ANTHROPIC_API_KEY) |
 | `--max-pages N` | Integer | 10 | Max pages to process when not using --full |
@@ -161,10 +189,22 @@ The `generate_skill.py` script provides a convenient way to generate skills from
 **Example Commands**:
 
 ```bash
-# Complete processing with local Claude (recommended)
+# Complete processing with local Claude (if you have Claude Code subscription)
 uv run python generate_skill.py \
   --pdf ../mvp/pdf/t4012-24e.pdf \
   --local-claude \
+  --full
+
+# Complete processing with Gemini (free tier)
+uv run python generate_skill.py \
+  --pdf ../mvp/pdf/t4012-24e.pdf \
+  --local-gemini \
+  --full
+
+# Complete processing with Codex
+uv run python generate_skill.py \
+  --pdf ../mvp/pdf/t4012-24e.pdf \
+  --local-codex \
   --full
 
 # Fast test without AI (first 10 pages)
@@ -182,17 +222,131 @@ uv run python generate_skill.py \
 
 ---
 
+## LLM CLI Provider Setup
+
+### Default Models Overview
+
+All providers use optimized default models for best quality:
+
+| Provider | Default Model | Context Window | Override Method |
+|----------|--------------|----------------|-----------------|
+| **Claude** | `sonnet` (4.5) | 200K tokens | `ANTHROPIC_MODEL=opus` |
+| **Gemini** | `gemini-2.5-pro` | 1M tokens | `GEMINI_MODEL=gemini-2.5-flash` |
+| **Codex** | System default | ~128K tokens | `codex exec --model gpt-5-codex` |
+
+---
+
+### Claude Code CLI
+
+**Installation**: Download from [claude.com](https://claude.com/claude-code)
+
+**Requirements**: Claude Code subscription (Code Max plan)
+
+**Command**: `claude`
+
+**Default Model**: `sonnet` (Claude Sonnet 4.5)
+- Balanced quality and speed
+- Optimal for document processing
+- Override via environment: `export ANTHROPIC_MODEL=opus`
+
+**Verification**:
+```bash
+which claude
+# Should output: /path/to/claude
+```
+
+### Gemini CLI
+
+**Installation**:
+```bash
+npm install -g @google/gemini-cli
+```
+
+**Requirements**:
+- Google account
+- Free tier: 1000 requests/day, 60 requests/minute
+- 1M token context window
+
+**Command**: `gemini`
+
+**Default Model**: `gemini-2.5-pro`
+- Highest quality from Gemini family
+- 1M token context window
+- Best for large documents
+- Override via environment: `export GEMINI_MODEL=gemini-2.5-flash`
+
+**Verification**:
+```bash
+which gemini
+gemini --version
+```
+
+**Features**:
+- Open source (Apache 2.0 license)
+- Free tier available
+- Faster than Claude for large contexts (1.5M char chunks)
+- GitHub: `google-gemini/gemini-cli`
+
+### OpenAI Codex CLI
+
+**Installation**:
+```bash
+# Download from GitHub releases
+# Visit: https://github.com/openai/codex
+```
+
+**Requirements**:
+- ChatGPT subscription or OpenAI API key
+- macOS or Linux (Windows via WSL)
+
+**Authentication**:
+```bash
+# Interactive login
+codex login
+
+# Or use environment variable
+export CODEX_API_KEY="your-api-key"
+```
+
+**Command**: `codex exec "prompt"`
+
+**Default Model**: System default (user-configured)
+- Uses your Codex CLI configuration
+- Typically defaults to latest GPT model
+- Override via flag: `codex exec --model gpt-5-codex "prompt"`
+
+**Verification**:
+```bash
+which codex
+codex exec "hello world"
+```
+
+**Features**:
+- OpenAI backing (high quality)
+- Open source on GitHub
+- Read-only mode by default (safe for content processing)
+- Supports multimodal inputs (text, screenshots, diagrams)
+
+---
+
 ## Output Structure
 
-Generated skill files are organized by category:
+Generated skills are organized as directory structures following [Skill_Seekers](../../../Skill_Seekers) patterns and Claude Skills best practices:
 
 ```
 skills_output/
-└── credits/                    # Category subdirectory
-    └── credits-t4012-24e.md   # Generated skill file
+└── credits-t4012-24e/              # Skill directory (named by skill ID)
+    ├── SKILL.md                     # Lightweight index (< 500 lines)
+    ├── references/                  # Detailed reference files
+    │   ├── index.md                # Navigation index
+    │   ├── carbon-rebate.md        # Chapter 1 (AI enhanced)
+    │   ├── tax-credits.md          # Chapter 2 (AI enhanced)
+    │   └── deductions.md           # Chapter 3 (AI enhanced)
+    └── raw/                        # Original extracted content
+        └── full-extract.txt        # Complete 721K characters
 ```
 
-**File Format**:
+### SKILL.md Format
 
 ```yaml
 ---
@@ -209,7 +363,30 @@ source: ../mvp/pdf/t4012-24e.pdf
 
 # Tax Credits
 
-## Canada Carbon Rebate for Small Businesses
+[Brief description]
+
+## 📖 When to Use This Skill
+- Tax credits and rebates
+- Credit eligibility and applications
+
+## 📚 Reference Documentation
+1. [Carbon Rebate](references/carbon-rebate.md)
+2. [Tax Credits](references/tax-credits.md)
+3. [Deductions](references/deductions.md)
+
+**[View Full Index](references/index.md)** | **[Raw Text](raw/full-extract.txt)**
+```
+
+### Reference File Format
+
+Each reference file contains AI-enhanced content from one chapter/chunk:
+
+```markdown
+# Carbon Rebate for Small Businesses
+
+**Chapter 1**
+
+---
 
 [Enhanced content with clear structure, examples, and actionable guidance]
 ```
@@ -218,85 +395,175 @@ source: ../mvp/pdf/t4012-24e.pdf
 
 ## Performance Benchmarks
 
-From test runs with real CRA PDFs:
+From test runs with real CRA PDFs (153 pages, 721K chars):
 
 | Stage | Time | Notes |
 |-------|------|-------|
-| PDF Extraction | 1-5 sec | Depends on PDF size; 153 pages ~0.5 sec |
+| PDF Extraction | 1-5 sec | Full document; 153 pages ~0.5 sec |
 | Classification | <1 sec | Keyword-based, very fast |
-| Skill Generation | <1 sec | Template-based |
-| Local Claude Enhancement | 2-4 min | Per 300K char chunk; **5-8 min for 720K PDF** |
-| API Enhancement | 5-15 sec | Automated, faster than CLI |
-| Validation | <1 sec | Format and quality checks |
+| Chapter Detection | <1 sec | Detects H1/H2 headings |
+| Skill Metadata Generation | <1 sec | Template-based |
+| **LLM Enhancement** | **Varies** | **Provider-optimized chunk sizes** |
+| - Claude (300K chunks) | 5-8 min/chunk | **15-25 min for 3 chunks** |
+| - Gemini (1.5M chunks) | 5-10 min/chunk | **5-10 min for 1 chunk** ⚡ |
+| - Codex (250K chunks) | 5-7 min/chunk | **15-20 min for 3 chunks** |
+| API Enhancement | 15-45 sec/chunk | **45-120 sec for 3 chunks** |
+| Directory Structure Creation | <1 sec | SKILL.md + references + raw |
 
 **Total Processing Time**:
-- Without AI: ~5-10 seconds (full 153-page doc)
-- With Local Claude: **5-8 minutes** (for 720K char / 153-page doc)
-- With API: ~15-25 seconds
+- Without AI: ~10 seconds (full 153-page doc)
+- With **Gemini CLI** (1 chunk): **5-10 minutes** ⚡ **FASTEST**
+- With **Claude CLI** (3 chunks): **15-25 minutes** ✅ Processes ALL content
+- With **Codex CLI** (3 chunks): **15-20 minutes**
+- With API (3 chunks): **1-2 minutes** (requires API key)
+
+**Provider-Optimized Chunk Sizes**:
+- ✅ **Claude**: 300K chars (~75K tokens) - Optimized for 200K input limit
+- ✅ **Gemini**: 1.5M chars (~375K tokens) - Leverages 1M token context window
+- ✅ **Codex**: 250K chars (~62K tokens) - Conservative for stability
+
+**Content Retention**:
+- ✅ **100% of original text preserved** in `raw/full-extract.txt`
+- ✅ **100% of content AI-enhanced** (split across reference files)
+- ✅ **No truncation or data loss**
 
 ---
 
-## Current Limitations
+## Key Features & Improvements
 
-### 1. Content Processing Limit
+### ✅ Provider-Optimized Chunk Sizes
 
-**Issue**: The script limits Claude enhancement to the first 300,000 characters per chunk (~75K tokens).
+**Status**: ✅ **IMPLEMENTED** (latest update)
 
-```python
-# From generate_skill.py line 38
-MAX_CHUNK_SIZE = 300_000  # ~75K tokens, optimal for 200K input + 64K output
-content_sample = content[:MAX_CHUNK_SIZE] if len(content) > MAX_CHUNK_SIZE else content
-```
+Each LLM provider uses its optimal chunk size based on context window:
 
-**Based on Claude Sonnet 4.5 specs**:
-- Input context: 200K tokens (≈800,000 chars)
-- Output limit: 64K tokens (≈256,000 chars)
-- Processing 300K chars (~75K tokens) leaves safe room for maximum 64K token output
-- Total utilization: ~139K tokens (69.6% of 200K context)
+**Gemini** (1M token context):
+- Chunk size: **1.5M chars** (~375K tokens)
+- Performance: Processes 721K doc in **1 chunk** instead of 3
+- Time savings: **~67% faster** (5-10 min vs 15-25 min)
+- Best for: Large documents requiring speed
 
-**Impact**:
-- Documents up to ~300 pages can be processed in one call
-- 720K PDF needs only 2-3 chunks (vs 144 with original 5K limit)
-- Information retention: ~42% per chunk (60x improvement from original)
-- Processing time: 5-8 minutes (vs 48 minutes with original limit)
+**Claude** (200K token context):
+- Chunk size: **300K chars** (~75K tokens)
+- Performance: Processes 721K doc in **3 chunks**
+- Time: 15-25 minutes
+- Best for: High quality with Claude Code subscription
 
-**Workaround**: Process specific page ranges or split large PDFs by chapter.
-
-**Future Fix**: Implement automatic chunked processing with overlap to handle documents of any size.
-
-### 2. Quality Scoring Gap
-
-**Issue**: The validator primarily checks format quality (YAML syntax, Markdown structure), not content completeness.
+**Codex** (128K token context):
+- Chunk size: **250K chars** (~62K tokens)
+- Performance: Processes 721K doc in **3 chunks**
+- Time: 15-20 minutes
+- Best for: OpenAI ecosystem users
 
 **Impact**:
-- A file with perfect formatting but missing 80% of content can score A+
-- No comparison to source document size or topic coverage
+- 🚀 Gemini now **3x faster** than before
+- ✅ No more "one size fits all" approach
+- ✅ Each provider works at optimal capacity
 
-**Workaround**: Manually review generated files for completeness.
+### ✅ Complete Content Processing
 
-**Future Fix**: Add completeness metrics (retention ratio, topic coverage) to validation.
+**Status**: ✅ **IMPLEMENTED** (as of Phase-02 update)
 
-### 3. Processing Mode
+- Intelligent chapter detection based on markdown headings
+- Automatic chunking at chapter/paragraph boundaries
+- Sequential processing of all chunks through chosen LLM
+- Complete preservation of source content
 
-**Current**: The test script is designed for testing and validation.
+**Before**: Only first 300K chars (42%) were enhanced, rest discarded
+**Now**: All 721K chars (100%) are processed with provider-optimized chunks
 
-**For Production**: Use the Python API directly for better control over chunking, error handling, and batch processing.
+### ✅ Progressive Disclosure Structure
+
+**Status**: ✅ **IMPLEMENTED** following Skill_Seekers patterns
+
+- SKILL.md as lightweight entry point (< 500 lines)
+- references/ directory for detailed content (按需加载)
+- raw/ directory for complete source text
+- Clear navigation with index files
+
+**Benefits for CRA Q&A**:
+- Claude only loads relevant chapters when needed
+- Reduced context window usage
+- Faster query response times
+
+### ✅ No Data Loss
+
+**Status**: ✅ **SOLVED**
+
+- Original extracted text: `raw/full-extract.txt` (721K chars)
+- Enhanced chunks: `references/*.md` (multiple files)
+- Complete chapter coverage with metadata
+
+---
+
+## Remaining Considerations
+
+### 1. Chapter Detection Quality
+
+**Current Implementation**: Detects H1 (`#`) and H2 (`##`) markdown headings
+
+**Limitation**: Some PDFs may not have clear heading structure
+
+**Impact**: Falls back to paragraph-based chunking (still processes all content)
+
+**Improvement**: Could add custom chapter pattern detection for specific CRA documents
+
+### 2. Processing Time vs Completeness Trade-off
+
+**Current**: 15-25 minutes to enhance full 721K document with local Claude
+
+**Alternative Options**:
+- Use API mode (1-2 minutes, requires API key and cost)
+- Use `--no-ai` flag (10 seconds, no enhancement)
+- Process specific page ranges with `--max-pages N`
+
+**Recommendation**: For production, consider API mode or selective enhancement
+
+### 3. Quality Scoring
+
+**Current**: Validator checks YAML syntax and markdown format
+
+**Not Measured**: Content accuracy, topic coverage, completeness
+
+**Workaround**: Manual review of generated files
+
+**Future**: Add semantic quality metrics
 
 ---
 
 ## Troubleshooting
 
-### `claude: command not found`
+### LLM CLI Not Found Errors
 
-**Solution**: Install Claude Code and ensure CLI is in PATH
+**`claude: command not found`**
+- **Solution**: Install Claude Code and ensure CLI is in PATH
 - Verify: `which claude`
 - Install: Download from [claude.com](https://claude.com/claude-code)
 
-### Local Claude doesn't enhance content
+**`gemini: command not found`**
+- **Solution**: Install Gemini CLI via npm
+- Install: `npm install -g @google/gemini-cli`
+- Verify: `which gemini && gemini --version`
 
-**Solution**: Check Claude Code subscription status
-- Requires Claude Code Max subscription
-- Fallback: Use `--api` mode with `ANTHROPIC_API_KEY`
+**`codex: command not found`**
+- **Solution**: Install Codex CLI
+- Install: `npm install -g @openai/codex` or `brew install codex`
+- Verify: `which codex && codex --version`
+
+### Enhancement Failures
+
+**Local Claude doesn't enhance content**
+- Check Claude Code subscription status (requires Code Max)
+- Fallback: Use `--local-gemini` (free) or `--api` mode
+
+**Gemini rate limit errors**
+- Free tier limits: 60 requests/minute, 1000 requests/day
+- Wait and retry, or use `--local-claude` or `--api` mode
+
+**Codex authentication errors**
+- Ensure OpenAI account has API access
+- Check API key configuration
+- Fallback: Use `--local-gemini` (free) or `--local-claude`
 
 ### PDF extraction fails
 

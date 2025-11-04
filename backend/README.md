@@ -1,79 +1,689 @@
-# BlockMe Backend
+# BeanFlow-CRA Backend
 
-FastAPI backend service for document processing and tax-focused Q&A system.
+**CRA 税务文档处理与智能问答系统**
 
-## Tech Stack
+完整的税务知识处理解决方案，包含两个核心部分：
 
-- **Python 3.11+** with type hints
-- **FastAPI** - Modern async web framework
-- **Anthropic Claude** - Skill routing and document analysis
-- **GLM-4** - Chinese document processing and Q&A
-- **PyMuPDF** - PDF processing
-- **python-docx** - Word document processing
+## 🏗️ 系统架构
 
-## Setup
+### Part 1: Skill 生成 Pipeline ✅ (已实现)
 
-### 1. Create virtual environment
+**离线文档处理工具** - 将 CRA 税务 PDF 转换为结构化的 Skill 文件
+
+```
+PDF 文档 → 多阶段 Pipeline → Skill Markdown 文件
+```
+
+**特点**:
+- 🤖 多阶段流水线（6 个独立阶段）
+- 💾 智能缓存机制
+- ⏸️ 断点续传支持
+- 📊 实时进度追踪
+
+**用途**: 生成 AI Agent 的知识库文档
+
+---
+
+### Part 2: FastAPI 问答服务 🚧 (规划中)
+
+**在线 API 服务** - 基于生成的 Skill 文件提供实时税务问答
+
+```
+用户问题 → FastAPI → 加载 Skills → Claude/GLM-4 → 智能回答
+```
+
+**规划特性**:
+- 🌐 REST API 接口
+- 📚 动态 Skill 加载
+- 🤖 多 LLM 支持（Claude, GLM-4）
+- 💬 会话管理
+- 🔍 上下文检索
+
+**用途**: 为前端提供实时税务咨询 API
+
+---
+
+## ✨ Part 1 特性（Skill 生成）
+
+- 🤖 **多阶段流水线**: 5 个独立可复用的处理阶段
+- 💾 **智能缓存**: 自动保存中间结果，避免重复处理
+- ⏸️ **断点续传**: 处理中断后可从上次位置继续
+- 🔄 **失败重试**: 单独重试失败的内容块
+- 📊 **进度追踪**: 实时显示处理进度和 ETA
+- 🎯 **智能分类**: 多信号内容分类算法
+- 📖 **章节检测**: 自动识别文档章节结构
+
+## 🚀 快速开始
+
+### 1. 环境配置
+
 ```bash
 cd backend
+
+# 创建虚拟环境
 uv venv .venv
 source .venv/bin/activate  # macOS/Linux
-```
 
-### 2. Install dependencies
-```bash
+# 安装依赖
 uv sync
-# Install dev dependencies
-uv sync --extra dev
 ```
 
-### 3. Configure environment
+### 2. 安装 LLM CLI (可选)
+
+如果需要 AI 增强功能，安装以下任一 CLI：
+
 ```bash
-cp .env.example .env
-# Edit .env and add your API keys
+# Claude Code (推荐)
+# 已包含在 Claude Code 订阅中
+
+# 或 Gemini CLI
+pip install google-generativeai
+
+# 或 OpenAI Codex
+pip install openai
 ```
 
-### 4. Run development server
+### 3. 基本使用
+
 ```bash
-uvicorn app.main:app --reload --port 8000
+# 快速测试（前 10 页，无 AI 增强）
+uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --no-ai
+
+# 完整处理（所有 151 页 + AI 增强）
+uv run python generate_skill.py \
+  --pdf ../mvp/pdf/t4012-24e.pdf \
+  --local-codex \
+  --full
+
+# 处理中断后自动续传
+uv run python generate_skill.py \
+  --pdf ../mvp/pdf/t4012-24e.pdf \
+  --local-codex \
+  --full
+# 自动从上次中断的 chunk 继续
 ```
 
-## Project Structure
+## 📐 架构概览
+
+### 多阶段 Pipeline
+
+系统采用 **6 阶段流水线架构**，每个阶段独立运行，结果缓存可复用：
+
+```
+PDF 文件
+   ↓
+┌─────────────────────────────────────────────────────────┐
+│ Stage 1: PDF 提取 (cached)                               │
+│ - 提取文本内容                                            │
+│ - 保存到 cache/extraction_<hash>.json                   │
+│ - 时间: 30秒 - 2分钟                                      │
+└─────────────────────────────────────────────────────────┘
+   ↓
+┌─────────────────────────────────────────────────────────┐
+│ Stage 2: 内容分类 (cached)                               │
+│ - 智能多信号分类算法                                      │
+│ - 保存到 cache/classification_<hash>.json               │
+│ - 时间: < 5秒                                            │
+└─────────────────────────────────────────────────────────┘
+   ↓
+┌─────────────────────────────────────────────────────────┐
+│ Stage 3: 内容分块 (cached)                               │
+│ - 章节检测 + 智能分块                                     │
+│ - 保存到 cache/chunks_<hash>.json                       │
+│ - 时间: < 10秒                                           │
+└─────────────────────────────────────────────────────────┘
+   ↓
+┌─────────────────────────────────────────────────────────┐
+│ Stage 4: AI 增强 (resumable) ⭐                          │
+│ - 逐个 chunk 增强并立即保存                               │
+│ - 保存到 cache/enhanced_chunks_<hash>/                  │
+│ - 支持断点续传和失败重试                                   │
+│ - 时间: 5-8 分钟/chunk (151页约7-11小时)                  │
+└─────────────────────────────────────────────────────────┘
+   ↓
+┌─────────────────────────────────────────────────────────┐
+│ Stage 5: 生成 Skill 目录                                 │
+│ - 组装最终目录结构                                         │
+│ - 输出到 skills_output/<skill-id>/                      │
+│ - 时间: < 5秒                                            │
+└─────────────────────────────────────────────────────────┘
+   ↓
+┌─────────────────────────────────────────────────────────┐
+│ Stage 6: SKILL.md 增强 (optional)                        │
+│ - 生成高质量 SKILL.md 索引                                │
+│ - 时间: 3-5 分钟                                          │
+└─────────────────────────────────────────────────────────┘
+   ↓
+最终输出：Skill 目录
+```
+
+### 关键优势
+
+**传统单体架构**：
+```
+❌ 415分钟运行中断 = 全部重来
+❌ 无中间结果保存
+❌ 难以调试和优化
+```
+
+**新 Pipeline 架构**：
+```
+✅ 任意阶段可单独运行
+✅ 中断后从断点继续
+✅ 缓存结果可复用
+✅ 清晰的错误定位
+```
+
+## 📖 使用场景
+
+### 场景 1: 统一入口处理
+
+**最常用方式** - 使用 `generate_skill.py` 一键处理：
+
+```bash
+# 处理完整 PDF（自动运行所有阶段）
+uv run python generate_skill.py \
+  --pdf ../mvp/pdf/t4012-24e.pdf \
+  --local-codex \
+  --full \
+  --enhance-skill
+```
+
+**特点**：
+- ✅ 自动检测缓存，跳过已完成阶段
+- ✅ 自动续传中断的 AI 增强
+- ✅ 用户无需了解内部细节
+
+### 场景 2: 分阶段手动运行
+
+**调试/优化时** - 手动控制每个阶段：
+
+```bash
+# Stage 1: 提取 PDF
+uv run python stage1_extract_pdf.py --pdf ../mvp/pdf/t4012-24e.pdf --full
+
+# Stage 2: 分类内容
+uv run python stage2_classify_content.py --extraction-id abc123
+
+# Stage 3: 分块
+uv run python stage3_chunk_content.py --extraction-id abc123
+
+# Stage 4: AI 增强（可随时中断，Ctrl+C）
+uv run python stage4_enhance_chunks.py --chunks-id abc123 --provider codex
+
+# Stage 4 中断后续传
+uv run python stage4_enhance_chunks.py --chunks-id abc123 --resume
+
+# Stage 5: 生成 Skill
+uv run python stage5_generate_skill.py --enhanced-id abc123
+```
+
+**适用于**：
+- 🔧 调试特定阶段问题
+- 🎯 测试不同 LLM provider
+- 📊 性能分析和优化
+
+### 场景 3: 只提取文本（无 AI）
+
+```bash
+# 快速提取并生成基础 Skill（无 AI 增强）
+uv run python generate_skill.py \
+  --pdf ../mvp/pdf/t4012-24e.pdf \
+  --no-ai \
+  --full
+```
+
+**时间**: 约 2-3 分钟（151页）
+
+## 📂 项目结构
 
 ```
 backend/
-├── pyproject.toml      # Python dependencies
-├── .venv/              # Virtual environment
-├── .env                # Environment variables
-├── tests/              # Test suite
-└── app/                # FastAPI application
-    ├── main.py
-    ├── api/            # API routes
-    ├── services/       # Business logic
-    ├── models/         # Data models
-    └── utils/          # Utilities
+├── generate_skill.py              # 统一入口 - Pipeline 编排器
+├── stage1_extract_pdf.py          # Stage 1: PDF 提取
+├── stage2_classify_content.py     # Stage 2: 内容分类
+├── stage3_chunk_content.py        # Stage 3: 内容分块
+├── stage4_enhance_chunks.py       # Stage 4: AI 增强
+├── stage5_generate_skill.py       # Stage 5: Skill 生成
+├── enhance_skill.py               # Stage 6: SKILL.md 增强
+│
+├── cache/                         # 缓存目录（自动生成）
+│   ├── README.md                  # 缓存格式说明
+│   ├── extraction_*.json          # Stage 1 缓存
+│   ├── classification_*.json      # Stage 2 缓存
+│   ├── chunks_*.json              # Stage 3 缓存
+│   └── enhanced_chunks_*/         # Stage 4 缓存
+│       ├── progress.json          # 进度追踪
+│       └── chunk-*.json           # 增强后的块
+│
+├── skills_output/                 # 最终输出目录
+│   └── <skill-id>/
+│       ├── SKILL.md               # 索引文件
+│       ├── references/            # 参考文档
+│       │   ├── index.md
+│       │   └── *.md
+│       └── raw/                   # 原始提取文本
+│           └── full-extract.txt
+│
+├── app/
+│   └── document_processor/        # 核心处理模块
+│       ├── pipeline_manager.py    # Pipeline + Cache 管理
+│       ├── pdf_extractor.py       # PDF 提取
+│       ├── content_classifier.py  # 内容分类
+│       ├── skill_generator.py     # Skill 生成
+│       ├── skill_enhancer.py      # SKILL.md 增强
+│       └── llm_cli_providers.py   # LLM Provider 抽象
+│
+├── docs/
+│   ├── PIPELINE_ARCHITECTURE.md   # 架构详细文档
+│   └── SKILL_ENHANCEMENT.md       # SKILL.md 增强说明
+│
+└── pyproject.toml                 # Python 依赖配置
 ```
 
-## Development
+## 🔧 命令行参数
 
-### Run tests
+### `generate_skill.py` (推荐使用)
+
 ```bash
+# 必需参数
+--pdf PATH                 # PDF 文件路径
+
+# PDF 提取选项
+--full                     # 处理完整文档（默认只处理前10页）
+--max-pages N              # 处理前 N 页（默认: 10）
+--force-extract            # 强制重新提取（忽略缓存）
+
+# LLM Provider 选项（必选其一）
+--no-ai                    # 跳过 AI 增强
+--local-claude             # 使用 Claude CLI
+--local-gemini             # 使用 Gemini CLI
+--local-codex              # 使用 Codex CLI
+
+# 增强选项
+--enhance-skill            # 增强 SKILL.md（额外3-5分钟）
+
+# 输出选项
+--output-dir DIR           # 输出目录（默认: skills_output）
+--cache-dir DIR            # 缓存目录（默认: backend/cache）
+```
+
+### Stage 脚本参数
+
+每个 stage 脚本支持 `--help` 查看完整参数：
+
+```bash
+uv run python stage1_extract_pdf.py --help
+uv run python stage4_enhance_chunks.py --help
+```
+
+## 💾 缓存机制
+
+### 工作原理
+
+1. **PDF Hash**: 基于 PDF 内容计算 SHA256 哈希（前16位）
+2. **自动检测**: 运行时自动检测已有缓存
+3. **跳过已完成**: 已缓存的阶段自动跳过
+4. **失效策略**: PDF 内容改变 → 新 Hash → 重新处理
+
+### 缓存位置
+
+```
+backend/cache/
+├── extraction_abc123.json          # ~1.5 MB (151页PDF)
+├── classification_abc123.json      # ~10 KB
+├── chunks_abc123.json              # ~1.5 MB
+└── enhanced_chunks_abc123/         # ~15 MB
+    ├── progress.json               # 进度追踪
+    ├── chunk-001.json              # ~180 KB
+    ├── chunk-002.json
+    └── ...
+```
+
+**总大小**: 约 18 MB / 151页PDF
+
+### 管理缓存
+
+```bash
+# 查看缓存大小
+du -sh backend/cache
+
+# 清理旧缓存（7天前）
+python -c "from app.document_processor.pipeline_manager import CacheManager; \
+           CacheManager().clean_cache(older_than_days=7)"
+
+# 删除特定 PDF 的缓存
+python -c "from app.document_processor.pipeline_manager import CacheManager; \
+           CacheManager().clean_cache(content_hash='abc123')"
+```
+
+## 🔄 断点续传
+
+### Stage 4 断点续传
+
+Stage 4 (AI 增强) 是最耗时的阶段，支持完整的断点续传：
+
+**场景**: 处理 40/83 chunks 时中断
+
+```bash
+# 第一次运行（处理到 40 个 chunk 后中断）
+uv run python stage4_enhance_chunks.py \
+  --chunks-id abc123 \
+  --provider codex
+# ... 处理中 ... Ctrl+C 中断
+
+# 自动续传（从第 41 个 chunk 开始）
+uv run python stage4_enhance_chunks.py \
+  --chunks-id abc123 \
+  --resume
+```
+
+**进度文件** `cache/enhanced_chunks_abc123/progress.json`:
+```json
+{
+  "total_chunks": 83,
+  "completed_chunks": 40,
+  "failed_chunks": [15, 23],
+  "start_time": "2025-11-04T10:05:00",
+  "last_update": "2025-11-04T13:30:00",
+  "estimated_remaining": "180 minutes",
+  "provider": "codex"
+}
+```
+
+### 重试失败的 Chunks
+
+```bash
+# 只重试失败的 chunks (15, 23)
+uv run python stage4_enhance_chunks.py \
+  --chunks-id abc123 \
+  --retry-failed
+```
+
+## 📊 性能数据
+
+### 处理时间估算（151页 PDF）
+
+| 阶段 | 时间 | 可跳过 |
+|------|------|--------|
+| Stage 1: PDF 提取 | 30秒 - 2分钟 | ✅ 缓存后 |
+| Stage 2: 内容分类 | < 5秒 | ✅ 缓存后 |
+| Stage 3: 内容分块 | < 10秒 | ✅ 缓存后 |
+| **Stage 4: AI 增强** | **7-11 小时** | ✅ 断点续传 |
+| Stage 5: Skill 生成 | < 5秒 | - |
+| Stage 6: SKILL 增强 | 3-5 分钟 | 可选 |
+| **总计** | **7-11 小时** | - |
+
+**Stage 4 详细**:
+- 83 chunks × 5-8 分钟/chunk
+- 可随时中断，续传时跳过已完成
+
+### 缓存收益
+
+**首次运行**: 7-11 小时
+**第二次运行（修改 prompt）**: 7-11 小时（Stage 4 可重用 Stage 1-3 缓存）
+**第三次运行（同 PDF）**: < 5秒（全部跳过）
+
+## 🐛 故障排查
+
+### 常见问题
+
+**1. Provider 不可用**
+
+```bash
+❌ Error: Provider 'codex' not available
+```
+
+**解决**:
+```bash
+# 检查 CLI 是否安装
+which claude  # 或 gemini-cli / openai
+
+# 检查是否在 PATH 中
+echo $PATH
+```
+
+**2. 缓存不匹配**
+
+```bash
+⚠️  Cached extraction found but page limit differs
+```
+
+**解决**: 这是正常行为，会自动重新提取
+
+**3. Enhancement 超时**
+
+```bash
+⏸️ Enhancement interrupted
+```
+
+**解决**: 使用 `--resume` 续传
+```bash
+uv run python stage4_enhance_chunks.py --chunks-id <hash> --resume
+```
+
+**4. 磁盘空间不足**
+
+```bash
+# 清理旧缓存
+python -c "from app.document_processor.pipeline_manager import CacheManager; \
+           CacheManager().clean_cache(older_than_days=7)"
+```
+
+### 获取帮助
+
+- 查看详细日志: 脚本输出中包含完整的错误信息
+- 检查缓存状态: `ls -lh backend/cache/`
+- 查看进度文件: `cat backend/cache/enhanced_chunks_*/progress.json`
+- 文档: `backend/docs/PIPELINE_ARCHITECTURE.md`
+
+---
+
+## 🚧 Part 2: FastAPI 问答服务（规划）
+
+### 架构设计
+
+**预期目录结构**:
+```
+backend/
+├── app/
+│   ├── main.py                    # FastAPI 应用入口
+│   ├── api/                       # API 路由
+│   │   ├── chat.py               # 问答接口
+│   │   ├── skills.py             # Skill 管理
+│   │   └── health.py             # 健康检查
+│   ├── services/                  # 业务逻辑
+│   │   ├── skill_loader.py       # Skill 文件加载
+│   │   ├── llm_service.py        # LLM 调用服务
+│   │   └── context_retrieval.py  # 上下文检索
+│   ├── models/                    # 数据模型
+│   │   ├── chat.py               # 聊天相关模型
+│   │   └── skill.py              # Skill 数据模型
+│   └── utils/                     # 工具函数
+│       └── markdown_parser.py     # Markdown 解析
+│
+└── document_processor/            # ✅ 已实现（Skill 生成）
+```
+
+### 核心功能
+
+#### 1. Skill 加载服务
+
+```python
+# services/skill_loader.py
+class SkillLoader:
+    """加载和索引 Skill 文件"""
+
+    def load_skills(self, skills_dir: Path):
+        """从 skills_output/ 加载所有 Skills"""
+
+    def search_skills(self, query: str):
+        """搜索相关的 Skill"""
+
+    def get_skill_content(self, skill_id: str):
+        """获取特定 Skill 的完整内容"""
+```
+
+#### 2. LLM 服务
+
+```python
+# services/llm_service.py
+class LLMService:
+    """LLM 调用抽象层"""
+
+    def chat(self, messages: List[dict], context: str):
+        """发送问题给 LLM，附带 Skill 上下文"""
+
+    def switch_provider(self, provider: str):
+        """切换 LLM provider (Claude/GLM-4)"""
+```
+
+#### 3. API 端点
+
+```python
+# api/chat.py
+@router.post("/chat")
+async def chat(request: ChatRequest):
+    """
+    税务问答接口
+
+    Request:
+        {
+            "question": "如何申报雇佣收入？",
+            "session_id": "optional-session-id",
+            "provider": "claude"  # or "glm4"
+        }
+
+    Response:
+        {
+            "answer": "...",
+            "sources": ["skill-1", "skill-2"],
+            "session_id": "..."
+        }
+    """
+```
+
+### 工作流程
+
+```
+1. 用户提问
+   ↓
+2. 检索相关 Skills
+   ├─ 基于关键词匹配
+   ├─ 基于分类标签
+   └─ 基于语义相似度（可选）
+   ↓
+3. 加载 Skill 内容作为上下文
+   ↓
+4. 调用 LLM (Claude/GLM-4)
+   ├─ System prompt: 税务专家角色
+   ├─ Context: 相关 Skill 内容
+   └─ User question: 用户问题
+   ↓
+5. 返回回答 + 来源引用
+```
+
+### 技术选型
+
+| 组件 | 技术 | 原因 |
+|------|------|------|
+| Web 框架 | FastAPI | 异步支持，自动文档 |
+| LLM | Claude Sonnet 4.5 | 高质量推理，长上下文 |
+| LLM (备选) | GLM-4 | 中文优化，成本较低 |
+| 向量数据库 | (可选) Chroma | 语义搜索 |
+| 会话存储 | Redis (可选) | 会话管理 |
+
+### 实施计划
+
+**Phase 1: 基础 API** (P0)
+- [x] FastAPI 项目结构
+- [ ] Skill 加载服务
+- [ ] 基本问答接口
+- [ ] Claude LLM 集成
+
+**Phase 2: 增强功能** (P1)
+- [ ] GLM-4 支持
+- [ ] 会话管理
+- [ ] 上下文检索优化
+- [ ] API 认证
+
+**Phase 3: 高级特性** (P2)
+- [ ] 向量化语义搜索
+- [ ] 多轮对话支持
+- [ ] 问答质量评估
+- [ ] 监控和日志
+
+### API 文档示例
+
+启动服务后访问：
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+### 环境变量
+
+```bash
+# .env
+ANTHROPIC_API_KEY=sk-xxx        # Claude API
+ZHIPU_API_KEY=xxx               # GLM-4 API (可选)
+REDIS_URL=redis://localhost     # 会话存储 (可选)
+SKILLS_DIR=../skills_output     # Skill 文件目录
+```
+
+### 开发命令
+
+```bash
+# 启动开发服务器（规划中）
+uvicorn app.main:app --reload --port 8000
+
+# 运行测试（规划中）
+pytest tests/test_api/ -v
+```
+
+### 预期性能
+
+| 指标 | 目标 |
+|------|------|
+| API 响应时间 | < 3秒（包括 LLM 调用）|
+| Skill 加载时间 | < 1秒（冷启动）|
+| 并发支持 | 100+ 请求/秒 |
+| 上下文长度 | 最多 50K tokens |
+
+---
+
+## 📚 相关文档
+
+### Part 1 文档
+- **[Pipeline 架构详解](docs/PIPELINE_ARCHITECTURE.md)** - 深入了解 Pipeline 设计
+- **[SKILL.md 增强说明](docs/SKILL_ENHANCEMENT.md)** - SKILL.md 增强功能设计
+- **[缓存格式文档](cache/README.md)** - 缓存文件格式和管理
+
+### Part 2 文档
+- **API 服务文档** (规划中) - FastAPI 接口说明
+- **LLM 集成指南** (规划中) - Claude/GLM-4 集成
+- **部署指南** (规划中) - 生产环境部署
+
+## 🤝 贡献指南
+
+### 开发环境
+
+```bash
+# 安装开发依赖
+uv sync --extra dev
+
+# 运行测试
 pytest tests/ -v
-pytest --cov=app tests/
-```
 
-### Code quality
-```bash
-# Format code
+# 代码格式化
 black .
 ruff check .
-
-# Type checking
-mypy app/
 ```
 
-## API Documentation
+### 添加新的 LLM Provider
 
-Once the server is running, visit:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+参考 `app/document_processor/llm_cli_providers.py` 中的 `LLMCLIProvider` 基类。
+
+---
+
+**License**: MIT
+**作者**: BeanFlow Team
+**版本**: 2.0 (Multi-Stage Pipeline)

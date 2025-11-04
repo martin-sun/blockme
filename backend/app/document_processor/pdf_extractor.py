@@ -29,6 +29,7 @@ class PageResult(BaseModel):
     processing_time: float = Field(..., description="Processing time in seconds")
     word_count: int = Field(..., description="Number of words")
     char_count: int = Field(..., description="Number of characters")
+    line_count: int = Field(..., description="Number of lines")
 
 
 class PDFMetadata(BaseModel):
@@ -171,7 +172,8 @@ class PDFTextExtractor:
                         text_quality=0.0,
                         processing_time=0.0,
                         word_count=0,
-                        char_count=0
+                        char_count=0,
+                        line_count=0
                     ))
 
             # Combine text
@@ -258,7 +260,8 @@ class PDFTextExtractor:
             needs_ocr=needs_ocr,
             processing_time=processing_time,
             word_count=len(text.split()),
-            char_count=len(text)
+            char_count=len(text),
+            line_count=len(text.split('\n'))
         )
 
     def _evaluate_text_quality(self, text: str) -> float:

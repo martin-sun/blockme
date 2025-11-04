@@ -3,7 +3,7 @@
   "file_size_mb": 0.850153923034668,
   "total_pages": 153,
   "tested_pages": 5,
-  "processing_time": 0.01720404624938965,
+  "processing_time": 0.0172879695892334,
   "pages_with_text": 5,
   "pages_needing_ocr": 0,
   "total_chars": 16430,
@@ -26,7 +26,7 @@
       "quality": 0.5,
       "has_images": true,
       "image_count": 1,
-      "processing_time": 0.008243083953857422
+      "processing_time": 0.007929801940917969
     },
     {
       "page": 2,
@@ -35,7 +35,7 @@
       "quality": 0.963855421686747,
       "has_images": false,
       "image_count": 0,
-      "processing_time": 0.0012671947479248047
+      "processing_time": 0.0013508796691894531
     },
     {
       "page": 3,
@@ -44,7 +44,7 @@
       "quality": 0.9094707520891365,
       "has_images": false,
       "image_count": 0,
-      "processing_time": 0.0024089813232421875
+      "processing_time": 0.002393960952758789
     },
     {
       "page": 4,
@@ -53,7 +53,7 @@
       "quality": 0.956687898089172,
       "has_images": false,
       "image_count": 0,
-      "processing_time": 0.0018150806427001953
+      "processing_time": 0.001737833023071289
     },
     {
       "page": 5,
@@ -62,7 +62,7 @@
       "quality": 0.9227696404793608,
       "has_images": false,
       "image_count": 0,
-      "processing_time": 0.0013208389282226562
+      "processing_time": 0.001271963119506836
     }
   ]
 }

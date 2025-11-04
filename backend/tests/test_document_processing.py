@@ -1,0 +1,370 @@
+"""
+Document Processing Integration Test
+
+Test complete document processing pipeline:
+PDF Extraction -> Content Classification -> Skill Generation -> Markdown Optimization -> Quality Validation
+"""
+
+import sys
+from pathlib import Path
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.document_processor import (
+    PDFTextExtractor,
+    PDFExtractorConfig,
+    ContentClassifier,
+    SkillGenerator,
+    MarkdownOptimizer,
+    OptimizationConfig,
+    AIProvider,
+    QualityValidator,
+    TaxCategory,
+    ClassificationResult,
+    QualityMetrics,
+)
+
+
+class TestDocumentProcessing:
+    """Document processing integration tests."""
+
+    def test_pdf_extraction_basic(self):
+        """Test basic PDF extraction (without actual PDF file)."""
+        config = PDFExtractorConfig(
+            enable_ocr=False,
+            max_pages=5
+        )
+        extractor = PDFTextExtractor(config)
+
+        # Verify configuration
+        assert extractor.config.enable_ocr == False
+        assert extractor.config.max_pages == 5
+        print("  PDF extractor configuration verified")
+
+    def test_content_classification(self):
+        """Test content classification."""
+        classifier = ContentClassifier()
+
+        # Test content
+        test_content = """
+        RRSP Contribution Guide
+
+        Registered Retirement Savings Plan (RRSP) allows you to save for retirement
+        while reducing your taxable income. Your RRSP contribution limit for 2024
+        is shown on your Notice of Assessment.
+
+        For example, if you earn $50,000 per year, your contribution room might be
+        $9,000 (18% of earned income). Any unused contribution room carries forward.
+
+        You can claim your RRSP deduction on line 20800 of your T1 return.
+        """
+
+        result = classifier.classify(test_content, "RRSP Contribution Guide")
+
+        # Verify classification result
+        assert result.primary_category is not None
+        assert result.confidence > 0
+        assert len(result.matched_keywords) > 0
+        assert result.quality_metrics.overall_score > 0
+        assert result.quality_metrics.quality_grade in ["A+", "A", "B", "C", "D", "F"]
+
+        print(f"\n  Classification results:")
+        print(f"    Primary category: {result.primary_category.value}")
+        print(f"    Confidence: {result.confidence:.2f}")
+        print(f"    Quality score: {result.quality_metrics.overall_score:.2f}")
+        print(f"    Quality grade: {result.quality_metrics.quality_grade}")
+        print(f"    Matched keywords: {', '.join(result.matched_keywords[:5])}")
+
+    def test_skill_generation(self):
+        """Test Skill generation."""
+        # Create mock classification result
+        classification = ClassificationResult(
+            primary_category=TaxCategory.RRSP,
+            secondary_categories=[TaxCategory.DEDUCTIONS],
+            confidence=0.95,
+            matched_keywords=["RRSP", "contribution", "deduction"],
+            quality_metrics=QualityMetrics(
+                completeness=0.8,
+                accuracy=0.9,
+                relevance=0.85,
+                clarity=0.9,
+                practicality=0.85
+            ),
+            suggestions=[]
+        )
+
+        # Test content
+        content = """
+# RRSP Contribution Guide
+
+## What is RRSP?
+
+Registered Retirement Savings Plan (RRSP) allows you to save for retirement while reducing taxable income.
+
+## Contribution Limit
+
+Your RRSP contribution limit is shown on your Notice of Assessment. Typically 18% of pre-tax income.
+
+## How to File
+
+Report your RRSP deduction on line 20800 of your T1 return.
+"""
+
+        # Create temporary output directory
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            generator = SkillGenerator(output_dir=tmpdir)
+            skill = generator.generate_skill(
+                content=content,
+                classification=classification,
+                source_file="test.pdf",
+                title="RRSP Contribution Guide"
+            )
+
+            # Verify generated Skill
+            assert skill.metadata.id != ""
+            assert skill.metadata.title == "RRSP Contribution Guide"
+            assert len(skill.metadata.tags) > 0
+            assert skill.metadata.category == TaxCategory.RRSP.value
+            assert len(skill.markdown_body) > 0
+
+            print(f"\n  Generated Skill:")
+            print(f"    ID: {skill.metadata.id}")
+            print(f"    Title: {skill.metadata.title}")
+            print(f"    Tags: {', '.join(skill.metadata.tags[:5])}")
+            print(f"    Quality grade: {skill.metadata.quality_grade}")
+
+            # Save and verify file
+            file_path = generator.save_skill(skill)
+            assert file_path.exists()
+
+            # Read and verify content
+            with open(file_path, 'r', encoding='utf-8') as f:
+                saved_content = f.read()
+
+            assert "---" in saved_content  # YAML front matter
+            assert "RRSP" in saved_content
+
+    def test_markdown_optimization_basic(self):
+        """Test basic Markdown optimization (without AI)."""
+        config = OptimizationConfig(
+            enable_ai_enhancement=False,
+            clean_artifacts=True,
+            fix_tables=True
+        )
+
+        optimizer = MarkdownOptimizer(config)
+
+        # Test content with formatting issues
+        test_content = """
+#Heading without space
+
+
+Multiple
+
+
+
+blank
+
+
+
+lines
+
+word-
+break
+"""
+
+        result = optimizer.optimize(test_content)
+
+        # Verify optimization result
+        assert result.optimized_content != test_content
+        assert result.ai_enhanced == False
+        assert len(result.improvements) > 0
+
+        print(f"\n  Optimization results:")
+        print(f"    Original word count: {result.word_count_before}")
+        print(f"    Optimized word count: {result.word_count_after}")
+        print(f"    Improvements: {', '.join(result.improvements)}")
+
+    def test_quality_validation(self):
+        """Test quality validation."""
+        validator = QualityValidator()
+
+        # Valid Skill content
+        valid_content = """---
+id: test-rrsp-guide
+title: RRSP Contribution Guide
+tags: [RRSP, Retirement, Tax]
+description: Detailed guide to RRSP contribution rules and tax benefits
+domain: tax
+category: rrsp
+priority: high
+---
+
+# RRSP Contribution Guide
+
+## What is RRSP?
+
+Registered Retirement Savings Plan (RRSP) is a CRA-approved retirement savings plan.
+
+## Contribution Limit
+
+Your RRSP contribution limit is 18% of pre-tax income, up to $31,560 (2024).
+
+For example, if your annual income is $50,000, your contribution limit is $9,000.
+
+## How to File
+
+Report your RRSP deduction on line 20800 of your T1 return.
+
+## References
+
+For details, visit [CRA Official Website](https://www.canada.ca/en/revenue-agency.html)
+"""
+
+        result = validator.validate_content(valid_content)
+
+        # Verify result
+        assert result.score >= 0
+        assert result.quality_grade in ["A+", "A", "B", "C", "D", "F"]
+
+        print(f"\n  Validation results:")
+        print(f"    Validation passed: {result.is_valid}")
+        print(f"    Quality score: {result.score:.1f}")
+        print(f"    Quality grade: {result.quality_grade}")
+        print(f"    Errors: {len(result.errors)}")
+        print(f"    Warnings: {len(result.warnings)}")
+
+        if result.errors:
+            print(f"\n  Errors:")
+            for error in result.errors:
+                print(f"    - {error.message}")
+
+        if result.warnings:
+            print(f"\n  Warnings:")
+            for warning in result.warnings[:3]:
+                print(f"    - {warning.message}")
+
+    def test_full_pipeline_simulation(self):
+        """Test complete pipeline (simulated)."""
+        print("\n\n========== Complete Document Processing Pipeline Test ==========\n")
+
+        # 1. Simulate PDF extraction result
+        extracted_text = """
+        RRSP Deduction Limit Statement
+
+        Your RRSP deduction limit for 2024 is $15,000.
+
+        This amount is calculated based on:
+        - 18% of your 2023 earned income ($80,000 x 18% = $14,400)
+        - Unused contribution room from previous years: $600
+
+        You can contribute up to this amount and claim it as a deduction
+        on your 2024 income tax return (T1 line 20800).
+
+        Important: Contributions made in the first 60 days of 2024
+        can be claimed on either your 2023 or 2024 return.
+
+        For more information, visit canada.ca/taxes or call CRA at 1-800-959-8281.
+        """
+
+        print("Step 1: PDF Extraction")
+        print(f"  Extracted word count: {len(extracted_text.split())}")
+
+        # 2. Content classification
+        print("\nStep 2: Content Classification")
+        classifier = ContentClassifier()
+        classification = classifier.classify(
+            extracted_text,
+            "RRSP Deduction Limit Statement"
+        )
+        print(f"  Category: {classification.primary_category.value}")
+        print(f"  Confidence: {classification.confidence:.2f}")
+        print(f"  Quality: {classification.quality_metrics.quality_grade}")
+
+        # 3. Generate Skill
+        print("\nStep 3: Generate Skill")
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            generator = SkillGenerator(output_dir=tmpdir)
+            skill = generator.generate_skill(
+                content=extracted_text,
+                classification=classification,
+                source_file="rrsp-deduction.pdf"
+            )
+            print(f"  Skill ID: {skill.metadata.id}")
+            print(f"  Title: {skill.metadata.title}")
+
+            # 4. Markdown optimization (without AI)
+            print("\nStep 4: Markdown Optimization")
+            config = OptimizationConfig(enable_ai_enhancement=False)
+            optimizer = MarkdownOptimizer(config)
+            optimized = optimizer.optimize(skill.markdown_body)
+            print(f"  Before: {optimized.word_count_before} words")
+            print(f"  After: {optimized.word_count_after} words")
+
+            # Update Skill content
+            skill.markdown_body = optimized.optimized_content
+
+            # 5. Save Skill
+            print("\nStep 5: Save Skill")
+            file_path = generator.save_skill(skill)
+            print(f"  File path: {file_path}")
+
+            # 6. Quality validation
+            print("\nStep 6: Quality Validation")
+            validator = QualityValidator()
+            validation = validator.validate_file(str(file_path))
+            print(f"  Validation passed: {validation.is_valid}")
+            print(f"  Quality score: {validation.score:.1f}")
+            print(f"  Quality grade: {validation.quality_grade}")
+
+            # Verify pipeline completed
+            assert file_path.exists()
+            assert validation.score > 0
+
+        print("\n========== Pipeline Test Complete ==========\n")
+
+
+if __name__ == "__main__":
+    # Run tests
+    test = TestDocumentProcessing()
+
+    print("Running integration tests...\n")
+
+    try:
+        test.test_pdf_extraction_basic()
+        print("✅ PDF extraction test passed\n")
+    except Exception as e:
+        print(f"❌ PDF extraction test failed: {e}\n")
+
+    try:
+        test.test_content_classification()
+        print("✅ Content classification test passed\n")
+    except Exception as e:
+        print(f"❌ Content classification test failed: {e}\n")
+
+    try:
+        test.test_skill_generation()
+        print("✅ Skill generation test passed\n")
+    except Exception as e:
+        print(f"❌ Skill generation test failed: {e}\n")
+
+    try:
+        test.test_markdown_optimization_basic()
+        print("✅ Markdown optimization test passed\n")
+    except Exception as e:
+        print(f"❌ Markdown optimization test failed: {e}\n")
+
+    try:
+        test.test_quality_validation()
+        print("✅ Quality validation test passed\n")
+    except Exception as e:
+        print(f"❌ Quality validation test failed: {e}\n")
+
+    try:
+        test.test_full_pipeline_simulation()
+        print("✅ Complete pipeline test passed\n")
+    except Exception as e:
+        print(f"❌ Complete pipeline test failed: {e}\n")

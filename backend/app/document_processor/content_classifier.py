@@ -271,6 +271,164 @@ class ContentClassifier:
             suggestions=suggestions
         )
 
+    def smart_categorize(
+        self,
+        text: str,
+        title: str = "",
+        source_file: str = "",
+        min_score: int = 2
+    ) -> ClassificationResult:
+        """
+        Smart categorization using Skill_Seekers multi-signal scoring algorithm.
+
+        This method uses weighted signals:
+        - Source file name (weight: 3) - strongest signal
+        - Title (weight: 2) - medium signal
+        - Content (weight: 1) - weakest signal
+
+        Args:
+            text: Document content
+            title: Document title
+            source_file: Source file path (e.g., PDF filename)
+            min_score: Minimum score threshold for categorization (default: 2)
+
+        Returns:
+            ClassificationResult with multi-signal based categorization
+        """
+        if not text or len(text.strip()) < 50:
+            logger.warning("Text content too short for accurate classification")
+            return self._create_default_result()
+
+        # Multi-signal scoring
+        category_scores = self._multi_signal_scoring(text, title, source_file)
+
+        # Determine primary and secondary categories with threshold
+        primary_category, secondary_categories, confidence = self._determine_categories_with_threshold(
+            category_scores, min_score
+        )
+
+        # Get matched keywords
+        matched_keywords = self._get_matched_keywords(text.lower(), primary_category)
+
+        # Quality assessment
+        quality_metrics = self._assess_quality(text, primary_category)
+
+        # Generate improvement suggestions
+        suggestions = self._generate_suggestions(quality_metrics, text)
+
+        logger.info(
+            f"Smart categorization: {primary_category.value} "
+            f"(confidence: {confidence:.2f}, score: {category_scores.get(primary_category, 0)})"
+        )
+
+        return ClassificationResult(
+            primary_category=primary_category,
+            secondary_categories=secondary_categories,
+            confidence=confidence,
+            matched_keywords=matched_keywords,
+            quality_metrics=quality_metrics,
+            suggestions=suggestions
+        )
+
+    def _multi_signal_scoring(
+        self,
+        text: str,
+        title: str,
+        source_file: str
+    ) -> Dict[TaxCategory, int]:
+        """
+        Multi-signal scoring algorithm from Skill_Seekers.
+
+        Scoring weights:
+        - Source file match: +3 points
+        - Title match: +2 points
+        - Content match: +1 point
+
+        Returns:
+            Dict mapping categories to integer scores
+        """
+        from collections import defaultdict
+
+        scores = defaultdict(int)
+
+        # Prepare search texts
+        text_lower = text.lower()
+        title_lower = title.lower()
+        source_lower = source_file.lower()
+
+        for category, keywords in self.CATEGORY_KEYWORDS.items():
+            for keyword in keywords:
+                keyword_lower = keyword.lower()
+
+                # Signal 1: Source file name (strongest signal, weight: 3)
+                if source_lower and keyword_lower in source_lower:
+                    scores[category] += 3
+
+                # Signal 2: Title (medium signal, weight: 2)
+                if title_lower and keyword_lower in title_lower:
+                    scores[category] += 2
+
+                # Signal 3: Content (weakest signal, weight: 1)
+                # Only count if keyword appears (not counting multiple occurrences)
+                if keyword_lower in text_lower:
+                    scores[category] += 1
+
+        return dict(scores)
+
+    def _determine_categories_with_threshold(
+        self,
+        category_scores: Dict[TaxCategory, int],
+        min_score: int = 2
+    ) -> Tuple[TaxCategory, List[TaxCategory], float]:
+        """
+        Determine primary category with minimum score threshold.
+
+        Args:
+            category_scores: Dict of category scores
+            min_score: Minimum score required for valid categorization
+
+        Returns:
+            Tuple of (primary_category, secondary_categories, confidence)
+        """
+        if not category_scores:
+            return TaxCategory.UNKNOWN, [], 0.0
+
+        # Sort by score
+        sorted_categories = sorted(
+            category_scores.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        # Check if best category meets minimum threshold
+        if not sorted_categories or sorted_categories[0][1] < min_score:
+            logger.warning(
+                f"Best category score {sorted_categories[0][1] if sorted_categories else 0} "
+                f"below threshold {min_score}, defaulting to UNKNOWN"
+            )
+            return TaxCategory.UNKNOWN, [], 0.0
+
+        primary_category, primary_score = sorted_categories[0]
+
+        # Secondary categories (score >= 30% of primary AND above threshold)
+        threshold = max(primary_score * 0.3, min_score)
+        secondary_categories = [
+            cat for cat, score in sorted_categories[1:5]
+            if score >= threshold
+        ]
+
+        # Calculate confidence based on score separation
+        total_score = sum(score for _, score in sorted_categories)
+        if total_score > 0:
+            # Confidence is ratio of primary score to total
+            confidence = primary_score / total_score
+            # Normalize to 0.5-1.0 range (we know it passed threshold)
+            confidence = 0.5 + (confidence * 0.5)
+        else:
+            confidence = 0.0
+
+        return primary_category, secondary_categories, min(confidence, 1.0)
+
     def _keyword_matching(self, text: str) -> Dict[TaxCategory, float]:
         """Calculate keyword-based category scores."""
         category_scores: Dict[TaxCategory, float] = {}
@@ -544,3 +702,38 @@ def classify_content(text: str, title: str = "") -> ClassificationResult:
     """
     classifier = ContentClassifier()
     return classifier.classify(text, title)
+
+
+def smart_classify_content(
+    text: str,
+    title: str = "",
+    source_file: str = "",
+    min_score: int = 2
+) -> ClassificationResult:
+    """
+    Convenience function for smart multi-signal categorization.
+
+    Uses Skill_Seekers algorithm with weighted signals:
+    - Source file name (weight: 3)
+    - Title (weight: 2)
+    - Content (weight: 1)
+
+    Args:
+        text: Document content
+        title: Document title
+        source_file: Source file path (e.g., PDF filename)
+        min_score: Minimum score threshold (default: 2)
+
+    Returns:
+        ClassificationResult with multi-signal based categorization
+
+    Example:
+        >>> result = smart_classify_content(
+        ...     text="Information about RRSP contributions...",
+        ...     title="RRSP Guide",
+        ...     source_file="t4012-rrsp.pdf"
+        ... )
+        >>> print(result.primary_category)  # TaxCategory.RRSP
+    """
+    classifier = ContentClassifier()
+    return classifier.smart_categorize(text, title, source_file, min_score)

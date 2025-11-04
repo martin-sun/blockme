@@ -153,11 +153,12 @@ class ClaudeCLIProvider(LLMCLIProvider):
         """
         Calculate timeout for Claude CLI.
 
-        Formula: max(90 seconds, 1 second per 1K characters)
+        Formula: max(240 seconds, 5 seconds per 1K characters)
         Typical: 5-8 minutes for 300K chunk
+        For skill enhancement: ~4-5 minutes for 40K prompt
         """
-        MIN_TIMEOUT = 90
-        TIMEOUT_PER_1K_CHARS = 1
+        MIN_TIMEOUT = 240  # 4 minutes minimum for skill enhancement
+        TIMEOUT_PER_1K_CHARS = 5  # More time for content generation
         return max(MIN_TIMEOUT, content_length // 1000 * TIMEOUT_PER_1K_CHARS)
 
     def uses_stdin(self) -> bool:
@@ -241,12 +242,13 @@ class GeminiCLIProvider(LLMCLIProvider):
         """
         Calculate timeout for Gemini CLI.
 
-        Gemini is typically faster than Claude.
-        Formula: max(60 seconds, 1 second per 2K characters)
+        Gemini is typically faster than Claude but still needs time for generation.
+        Formula: max(180 seconds, 3 seconds per 1K characters)
+        For skill enhancement: ~3-4 minutes for 40K prompt
         """
-        MIN_TIMEOUT = 60
-        TIMEOUT_PER_2K_CHARS = 1
-        return max(MIN_TIMEOUT, content_length // 2000 * TIMEOUT_PER_2K_CHARS)
+        MIN_TIMEOUT = 180  # 3 minutes minimum for skill enhancement
+        TIMEOUT_PER_1K_CHARS = 3  # Faster than Claude but still generous
+        return max(MIN_TIMEOUT, content_length // 1000 * TIMEOUT_PER_1K_CHARS)
 
     def uses_stdin(self) -> bool:
         """Gemini CLI uses command argument for prompt (not stdin)."""
@@ -344,10 +346,11 @@ class CodexCLIProvider(LLMCLIProvider):
         Calculate timeout for Codex CLI.
 
         Using conservative estimate similar to Claude.
-        Formula: max(90 seconds, 1 second per 1K characters)
+        Formula: max(240 seconds, 5 seconds per 1K characters)
+        For skill enhancement: ~4-5 minutes for 40K prompt
         """
-        MIN_TIMEOUT = 90
-        TIMEOUT_PER_1K_CHARS = 1
+        MIN_TIMEOUT = 240  # 4 minutes minimum for skill enhancement
+        TIMEOUT_PER_1K_CHARS = 5  # More time for content generation
         return max(MIN_TIMEOUT, content_length // 1000 * TIMEOUT_PER_1K_CHARS)
 
     def uses_stdin(self) -> bool:

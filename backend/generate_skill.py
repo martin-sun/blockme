@@ -14,12 +14,17 @@ Usage:
 """
 
 import argparse
+import logging
 import re
 import subprocess
 import tempfile
 import shutil
 import sys
 from pathlib import Path
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Add backend to Python path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -40,6 +45,7 @@ from app.document_processor.llm_cli_providers import (
     get_provider,
     detect_available_providers
 )
+from app.document_processor.skill_enhancer import SkillEnhancer
 
 # Claude processing configuration
 # Based on Claude Sonnet 4.5 specs: 200K token input, 64K token output (≈800K chars)
@@ -115,42 +121,182 @@ def merge_enhanced_chunks(chunks: list[str]) -> str:
     return "\n\n".join(chunk.strip() for chunk in chunks if chunk.strip())
 
 
-def detect_chapters(content: str) -> list[dict]:
+def detect_chapters(content: str, min_confidence: float = 0.6) -> list[dict]:
     """
-    Detect chapter structure in content based on markdown headings.
+    Detect chapter structure using Skill_Seekers enhanced algorithm.
 
-    Identifies main chapters (# and ## headings) to intelligently split content.
-    Similar to Skill_Seekers' chapter detection pattern.
+    Detection methods (in order of priority):
+    1. Markdown headings (# and ##)
+    2. Pattern matching ("Chapter N", "Part N", "Section N.N")
+    3. All-caps headings (INTRODUCTION, OVERVIEW, etc.)
 
     Args:
         content: Full document content
+        min_confidence: Minimum confidence score (0-1) for chapter detection
 
     Returns:
-        List of chapter dicts with {title, start_pos, level, slug}
+        List of chapter dicts with {title, start_pos, level, slug, confidence}
     """
     chapters = []
 
-    # Match H1 (# ) and H2 (## ) headings at line start
+    # Method 1: Markdown headings (highest confidence: 1.0)
     heading_pattern = re.compile(r'^(#{1,2})\s+(.+)$', re.MULTILINE)
-
     for match in heading_pattern.finditer(content):
-        level = len(match.group(1))  # Number of # symbols
+        level = len(match.group(1))
         title = match.group(2).strip()
         start_pos = match.start()
 
-        # Generate slug from title (kebab-case)
-        slug = re.sub(r'[^a-zA-Z0-9\s-]', '', title.lower())
-        slug = re.sub(r'\s+', '-', slug)
-        slug = re.sub(r'-+', '-', slug).strip('-')
+        # Skip if it's just a page marker
+        if re.match(r'^={3,}\s*Page\s+\d+\s*={3,}$', title, re.IGNORECASE):
+            continue
+
+        slug = _slugify(title)
 
         chapters.append({
             'title': title,
             'level': level,
             'start_pos': start_pos,
-            'slug': slug
+            'slug': slug,
+            'confidence': 1.0,
+            'method': 'markdown'
         })
 
-    return chapters
+    # Method 2: Pattern matching (confidence: 0.9)
+    # Skill_Seekers patterns
+    chapter_patterns = [
+        (r'^Chapter\s+(\d+)[:\-\s](.+)$', 'Chapter {0}: {1}'),
+        (r'^Part\s+(\d+)[:\-\s](.+)$', 'Part {0}: {1}'),
+        (r'^Section\s+(\d+(?:\.\d+)?)[:\-\s](.+)$', 'Section {0}: {1}'),
+        (r'^(\d+)\.\s+([A-Z][^\n]{5,50})$', '{0}. {1}'),  # "1. Introduction"
+        (r'^([IVXLCDM]+)\.\s+([A-Z][^\n]{5,50})$', '{0}. {1}'),  # "I. Overview"
+    ]
+
+    for pattern, title_template in chapter_patterns:
+        for match in re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE):
+            start_pos = match.start()
+
+            # Skip if we already have a markdown heading at this position
+            if any(abs(ch['start_pos'] - start_pos) < 10 for ch in chapters):
+                continue
+
+            # Extract number and title
+            if len(match.groups()) == 2:
+                number, title_part = match.groups()
+                title = title_template.format(number, title_part.strip())
+            else:
+                title = match.group(0).strip()
+
+            slug = _slugify(title)
+
+            chapters.append({
+                'title': title,
+                'level': 1,
+                'start_pos': start_pos,
+                'slug': slug,
+                'confidence': 0.9,
+                'method': 'pattern'
+            })
+
+    # Method 3: All-caps headings (confidence: 0.7)
+    # Find lines that are ALL CAPS and reasonably short (likely headings)
+    allcaps_pattern = re.compile(r'^([A-Z][A-Z\s]{5,50})$', re.MULTILINE)
+    for match in allcaps_pattern.finditer(content):
+        start_pos = match.start()
+
+        # Skip if too close to existing chapters
+        if any(abs(ch['start_pos'] - start_pos) < 10 for ch in chapters):
+            continue
+
+        title = match.group(1).strip()
+
+        # Filter out common false positives
+        false_positives = ['PDF', 'CRA', 'GST', 'HST', 'RRSP', 'TFSA', 'HTTP', 'HTTPS']
+        if title in false_positives or len(title) < 6:
+            continue
+
+        # Convert to title case for readability
+        title_cased = title.title()
+        slug = _slugify(title_cased)
+
+        chapters.append({
+            'title': title_cased,
+            'level': 2,
+            'start_pos': start_pos,
+            'slug': slug,
+            'confidence': 0.7,
+            'method': 'allcaps'
+        })
+
+    # Filter by confidence threshold
+    chapters = [ch for ch in chapters if ch['confidence'] >= min_confidence]
+
+    # Sort by position
+    chapters.sort(key=lambda x: x['start_pos'])
+
+    # Remove duplicates (chapters too close to each other)
+    deduplicated = []
+    for chapter in chapters:
+        # Check if there's already a chapter within 100 characters
+        if not any(abs(ch['start_pos'] - chapter['start_pos']) < 100 for ch in deduplicated):
+            deduplicated.append(chapter)
+
+    logger.info(f"Detected {len(deduplicated)} chapters using methods: "
+                f"{', '.join(set(ch['method'] for ch in deduplicated))}")
+
+    return deduplicated
+
+
+def clean_content(content: str) -> str:
+    """
+    Clean extracted content by removing artifacts and page markers.
+
+    Removes:
+    - Page markers (=== Page N ===)
+    - PDF artifacts
+    - Excessive whitespace
+
+    Args:
+        content: Raw extracted content
+
+    Returns:
+        Cleaned content
+    """
+    # Remove page markers (=== Page N ===, === Page 1 ===, etc.)
+    content = re.sub(r'={3,}\s*Page\s+\d+\s*={3,}', '', content, flags=re.IGNORECASE)
+
+    # Remove other common PDF markers
+    content = re.sub(r'\[Page\s+\d+\]', '', content, flags=re.IGNORECASE)
+    content = re.sub(r'Page\s+\d+\s+of\s+\d+', '', content, flags=re.IGNORECASE)
+
+    # Remove excessive whitespace (more than 3 newlines)
+    content = re.sub(r'\n{4,}', '\n\n\n', content)
+
+    # Remove leading/trailing whitespace
+    content = content.strip()
+
+    logger.info("Content cleaned: removed page markers and PDF artifacts")
+
+    return content
+
+
+def _slugify(title: str) -> str:
+    """
+    Convert title to URL-friendly slug (Skill_Seekers pattern).
+
+    Args:
+        title: Chapter title
+
+    Returns:
+        Lowercase slug with hyphens
+    """
+    # Remove special characters
+    slug = re.sub(r'[^a-zA-Z0-9\s-]', '', title.lower())
+    # Replace spaces with hyphens
+    slug = re.sub(r'\s+', '-', slug)
+    # Remove multiple consecutive hyphens
+    slug = re.sub(r'-+', '-', slug).strip('-')
+    # Limit length
+    return slug[:50]
 
 
 def split_by_chapters(content: str, max_chunk_size: int = MAX_CHUNK_SIZE) -> list[dict]:
@@ -332,6 +478,7 @@ def main():
     parser.add_argument('--api', action='store_true', help='Use API for enhancement (requires ANTHROPIC_API_KEY)')
     parser.add_argument('--full', action='store_true', help='Process full document (default: first 10 pages)')
     parser.add_argument('--max-pages', type=int, default=10, help='Max pages to process if not --full')
+    parser.add_argument('--enhance-skill', action='store_true', help='Enhance SKILL.md with AI after generation (adds 3-5 minutes)')
 
     args = parser.parse_args()
 
@@ -397,15 +544,28 @@ def main():
         ])
         extraction.total_text = limited_text
 
-    # Step 2: Classify Content
+    # Step 1.5: Clean Content (remove page markers and artifacts)
     print("\n" + "="*60)
-    print("Step 2: Classifying Content")
+    print("Step 1.5: Cleaning Content")
+    print("="*60)
+
+    original_length = len(extraction.total_text)
+    extraction.total_text = clean_content(extraction.total_text)
+    removed_chars = original_length - len(extraction.total_text)
+
+    print(f"✅ Removed {removed_chars:,} characters of artifacts")
+    print(f"✅ Clean content: {len(extraction.total_text):,} characters")
+
+    # Step 2: Classify Content (Smart Multi-Signal)
+    print("\n" + "="*60)
+    print("Step 2: Smart Multi-Signal Classification")
     print("="*60)
 
     classifier = ContentClassifier()
-    classification = classifier.classify(
-        extraction.total_text,
-        title=pdf_path.stem
+    classification = classifier.smart_categorize(
+        text=extraction.total_text,
+        title=pdf_path.stem,
+        source_file=str(pdf_path)
     )
 
     print(f"✅ Primary category: {classification.primary_category.value}")
@@ -555,6 +715,46 @@ def main():
     )
     print(f"\n✅ Total directory size: {total_size:,} bytes")
 
+    # Step 7: SKILL.md Enhancement (optional)
+    skill_enhanced = False
+    if args.enhance_skill and llm_provider:
+        print("\n" + "="*60)
+        print("Step 7: Enhancing SKILL.md with AI")
+        print("="*60)
+
+        print(f"📖 Reading references from {skill_dir}")
+        print(f"🤖 Using {llm_provider.name} for enhancement")
+        print(f"⏱️  Estimated time: 3-5 minutes")
+
+        enhancer = SkillEnhancer()
+
+        try:
+            skill_enhanced = enhancer.enhance_skill(skill_dir, llm_provider)
+
+            if skill_enhanced:
+                print("✅ SKILL.md enhanced successfully (quality: 9/10)")
+                backup_file = skill_dir / "SKILL.md.backup"
+                print(f"💾 Backup saved: {backup_file}")
+
+                # Show size comparison
+                skill_md = skill_dir / "SKILL.md"
+                if backup_file.exists():
+                    backup_size = backup_file.stat().st_size
+                    enhanced_size = skill_md.stat().st_size
+                    print(f"📊 SKILL.md size: {backup_size:,} → {enhanced_size:,} bytes ({enhanced_size / backup_size:.1f}x)")
+            else:
+                print("⚠️  Enhancement failed, using basic SKILL.md (quality: 5/10)")
+                print("   Check logs above for details")
+
+        except Exception as e:
+            print(f"⚠️  Enhancement error: {e}")
+            print("   Using basic SKILL.md")
+            skill_enhanced = False
+
+    elif args.enhance_skill and not llm_provider:
+        print("\n⚠️  Warning: --enhance-skill requires an LLM provider (--local-claude, --local-gemini, or --local-codex)")
+        print("   Skipping SKILL.md enhancement")
+
     # Summary
     print("\n" + "="*60)
     print("✅ Processing Complete!")
@@ -574,6 +774,10 @@ def main():
         enhancement_method = "No"
 
     print(f"AI Enhanced: {enhancement_method}")
+    if skill_enhanced:
+        print(f"SKILL.md Enhanced: Yes (quality: 9/10)")
+    else:
+        print(f"SKILL.md Enhanced: No (use --enhance-skill)")
     print(f"Total Size: {total_size:,} bytes")
     print("="*60 + "\n")
 

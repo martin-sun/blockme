@@ -1,0 +1,68 @@
+{
+  "pdf_file": "pdf/t4012-24e.pdf",
+  "file_size_mb": 0.850153923034668,
+  "total_pages": 153,
+  "tested_pages": 5,
+  "processing_time": 0.01720404624938965,
+  "pages_with_text": 5,
+  "pages_needing_ocr": 0,
+  "total_chars": 16430,
+  "average_quality": 0.8505567424688832,
+  "keywords": {
+    "tax credits": 1,
+    "CRA": 11,
+    "T4012": 1
+  },
+  "metadata": {
+    "title": "Microsoft Word - t4012-24e.docx",
+    "author": "NXR168",
+    "creator": "PScript5.dll Version 5.2.2"
+  },
+  "page_results": [
+    {
+      "page": 1,
+      "chars": 130,
+      "words": 10,
+      "quality": 0.5,
+      "has_images": true,
+      "image_count": 1,
+      "processing_time": 0.008243083953857422
+    },
+    {
+      "page": 2,
+      "chars": 1605,
+      "words": 249,
+      "quality": 0.963855421686747,
+      "has_images": false,
+      "image_count": 0,
+      "processing_time": 0.0012671947479248047
+    },
+    {
+      "page": 3,
+      "chars": 4650,
+      "words": 718,
+      "quality": 0.9094707520891365,
+      "has_images": false,
+      "image_count": 0,
+      "processing_time": 0.0024089813232421875
+    },
+    {
+      "page": 4,
+      "chars": 5205,
+      "words": 785,
+      "quality": 0.956687898089172,
+      "has_images": false,
+      "image_count": 0,
+      "processing_time": 0.0018150806427001953
+    },
+    {
+      "page": 5,
+      "chars": 4840,
+      "words": 751,
+      "quality": 0.9227696404793608,
+      "has_images": false,
+      "image_count": 0,
+      "processing_time": 0.0013208389282226562
+    }
+  ]
+}

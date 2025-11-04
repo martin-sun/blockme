@@ -1,0 +1,26 @@
+{
+  "file_path": "pdf/t4012-24e.pdf",
+  "total_pages": 153,
+  "successful_pages": 153,
+  "pages_needing_ocr": 0,
+  "processing_time": 0.28672122955322266,
+  "memory_peak_mb": 65.53125,
+  "total_chars": 721799,
+  "total_words": 111244,
+  "metadata": {
+    "title": "Microsoft Word - t4012-24e.docx",
+    "author": "NXR168",
+    "subject": "",
+    "creator": "PScript5.dll Version 5.2.2",
+    "producer": "Acrobat Distiller 23.0 (Windows)",
+    "creation_date": "D:20250402140113-04'00'",
+    "modification_date": "D:20250402140113-04'00'",
+    "page_count": 153,
+    "is_encrypted": false
+  },
+  "stats": {
+    "pages_processed": 153,
+    "ocr_used": 0,
+    "errors": 0
+  }
+}

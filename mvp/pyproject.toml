@@ -7,6 +7,11 @@ dependencies = [
     "anthropic>=0.40.0",
     "zhipuai>=2.0.0",
     "pyyaml>=6.0",
+    # PDF 处理依赖
+    "PyMuPDF>=1.24.0",
+    "Pillow>=11.0.0",
+    "pytesseract>=0.3.13",
+    "psutil>=5.9.0",
 ]
 
 [tool.hatch.build.targets.wheel]

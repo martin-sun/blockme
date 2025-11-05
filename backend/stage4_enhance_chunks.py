@@ -25,12 +25,15 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import subprocess
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Dict, Tuple
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -131,13 +134,88 @@ Enhanced content (Markdown only):"""
         raise
 
 
+def process_chunk_worker(
+    chunk_num: int,
+    chunk_data: Dict,
+    category: str,
+    total_chunks: int,
+    provider_name: str,
+    chunks_id: str,
+    cache_dir: Path
+) -> Tuple[int, bool, str, float]:
+    """
+    Worker function to process a single chunk in a subprocess.
+
+    Args:
+        chunk_num: Chunk number (1-indexed)
+        chunk_data: Chunk data dictionary
+        category: Tax category
+        total_chunks: Total number of chunks
+        provider_name: LLM provider name
+        chunks_id: Chunks cache ID
+        cache_dir: Cache directory path
+
+    Returns:
+        Tuple of (chunk_num, success, message, processing_time)
+    """
+    start_time = time.time()
+
+    try:
+        # Initialize provider in this subprocess
+        provider = get_provider(provider_name)
+        if not provider:
+            return (chunk_num, False, f"Provider '{provider_name}' not available", 0.0)
+
+        # Enhance the chunk
+        enhanced_content = enhance_single_chunk(
+            chunk_data['content'],
+            category,
+            chunk_num,
+            total_chunks,
+            provider
+        )
+
+        # Save enhanced chunk immediately
+        pipeline = PipelineManager(cache_dir)
+        output_dir = pipeline.cache_manager.get_cache_path(
+            PipelineStage.ENHANCEMENT,
+            chunks_id
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        chunk_file = output_dir / f"chunk-{chunk_num:03d}.json"
+        chunk_output = {
+            "chunk_id": chunk_num,
+            "title": chunk_data.get('title', ''),
+            "slug": chunk_data.get('slug', ''),
+            "enhanced_content": enhanced_content,
+            "original_char_count": chunk_data.get('char_count', 0),
+            "enhanced_char_count": len(enhanced_content),
+            "enhanced_at": datetime.now().isoformat(),
+            "provider": provider_name
+        }
+
+        with open(chunk_file, 'w', encoding='utf-8') as f:
+            json.dump(chunk_output, f, ensure_ascii=False, indent=2)
+
+        processing_time = time.time() - start_time
+        return (chunk_num, True, f"Success ({processing_time:.1f}s)", processing_time)
+
+    except Exception as e:
+        processing_time = time.time() - start_time
+        error_msg = f"Failed: {str(e)}"
+        logger.error(f"Chunk {chunk_num} failed: {e}")
+        return (chunk_num, False, error_msg, processing_time)
+
+
 def enhance_chunks(
     chunks_id: str,
     provider_name: str = None,
     resume: bool = False,
     retry_failed: bool = False,
     force: bool = False,
-    cache_dir: Path = None
+    cache_dir: Path = None,
+    workers: int = 1
 ) -> bool:
     """
     Enhance all chunks with AI, saving progressively.
@@ -189,12 +267,20 @@ def enhance_chunks(
         progress = None
     elif progress and not resume and not retry_failed:
         completed = progress.get("completed_chunks", 0)
-        failed = len(progress.get("failed_chunks", []))
-        print(f"\n⚠️  Found existing progress:")
-        print(f"   Completed: {completed}/{total_chunks}")
-        print(f"   Failed: {failed}")
-        print(f"   Use --resume to continue or --force to restart")
-        return False
+        failed_count = len(progress.get("failed_chunks", []))
+
+        # Check if all chunks are already completed
+        if completed == total_chunks and failed_count == 0:
+            print(f"\n✅ All chunks already enhanced ({completed}/{total_chunks})")
+            print(f"   Skipping enhancement stage")
+            return True  # Success - all work is done
+        else:
+            # Incomplete progress - require explicit resume
+            print(f"\n⚠️  Found incomplete progress:")
+            print(f"   Completed: {completed}/{total_chunks}")
+            print(f"   Failed: {failed_count}")
+            print(f"   Use --resume to continue or --force to restart")
+            return False
 
     # Determine provider
     if provider_name:
@@ -242,116 +328,181 @@ def enhance_chunks(
         }
 
     print(f"\nChunks to process: {len(chunks_to_process)}")
-    print(f"Estimated time: {len(chunks_to_process) * 5}-{len(chunks_to_process) * 8} minutes")
+    print(f"Workers: {workers}")
+    est_time_per_chunk = 6  # average minutes per chunk
+    est_total = len(chunks_to_process) * est_time_per_chunk / workers
+    print(f"Estimated time: {int(est_total)} minutes ({len(chunks_to_process)} chunks ÷ {workers} workers)")
     print(f"\n{'='*60}")
 
     # Process chunks
     start_time = time.time()
     successful = 0
     failed = 0
+    completed_count = 0
+    active_chunks = set()
 
-    for i, chunk_num in enumerate(chunks_to_process, 1):
-        chunk_index = chunk_num - 1  # 0-indexed for array access
-        chunk = chunks[chunk_index]
-
-        print(f"\n--- Chunk {chunk_num}/{total_chunks}: {chunk['title'][:50]} ---")
-        print(f"Progress: {i}/{len(chunks_to_process)} ({i*100//len(chunks_to_process)}%)")
-        print(f"Size: {chunk['char_count']:,} chars")
-
-        # Check if already completed
+    # Filter chunks that need processing
+    chunks_needing_processing = []
+    for chunk_num in chunks_to_process:
+        chunk_index = chunk_num - 1
         existing_chunk_file = pipeline.cache_manager.get_cache_path(
             PipelineStage.ENHANCEMENT,
             chunks_id
         ) / f"chunk-{chunk_num:03d}.json"
 
-        if existing_chunk_file.exists() and not retry_failed:
-            print(f"✓ Already enhanced, skipping")
+        if existing_chunk_file.exists() and not retry_failed and not force:
+            # Already completed, skip
+            completed_count += 1
+            successful += 1
             continue
 
-        try:
-            # Enhance chunk
-            print(f"🤖 Enhancing with {provider_name}...")
-            chunk_start = time.time()
+        chunks_needing_processing.append((chunk_num, chunks[chunk_index]))
 
-            enhanced_content = enhance_single_chunk(
-                chunk['content'],
-                category,
+    if not chunks_needing_processing:
+        print("\n✅ All chunks already completed!")
+        print(f"\n💡 Next step: uv run python stage5_generate_skill.py --enhanced-id {chunks_id}")
+        return True
+
+    print(f"\n🔄 Processing {len(chunks_needing_processing)} chunks with {workers} workers...")
+
+    # Use ProcessPoolExecutor for parallel processing
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            # Submit all chunks
+            future_to_chunk = {}
+            for chunk_num, chunk_data in chunks_needing_processing:
+                future = executor.submit(
+                    process_chunk_worker,
+                    chunk_num,
+                    chunk_data,
+                    category,
+                    total_chunks,
+                    provider_name,
+                    chunks_id,
+                    cache_dir or Path('cache')
+                )
+                future_to_chunk[future] = chunk_num
+                active_chunks.add(chunk_num)
+
+            # Process completed chunks as they finish
+            try:
+                for future in as_completed(future_to_chunk):
+                    chunk_num = future_to_chunk[future]
+                    active_chunks.discard(chunk_num)
+
+                    try:
+                        result_chunk_num, success, message, proc_time = future.result()
+                        completed_count += 1
+
+                        # Update progress
+                        if success:
+                            successful += 1
+                            # Remove from failed list if present
+                            if result_chunk_num in progress.get("failed_chunks", []):
+                                progress["failed_chunks"].remove(result_chunk_num)
+                            # Update completed count
+                            progress["completed_chunks"] = max(
+                                progress.get("completed_chunks", 0),
+                                result_chunk_num
+                            )
+                        else:
+                            failed += 1
+                            if result_chunk_num not in progress.get("failed_chunks", []):
+                                progress["failed_chunks"].append(result_chunk_num)
+
+                        # Calculate ETA
+                        elapsed = time.time() - start_time
+                        avg_time = elapsed / completed_count if completed_count > 0 else 0
+                        remaining = len(chunks_needing_processing) - completed_count
+                        eta_seconds = (remaining / workers) * avg_time if avg_time > 0 else 0
+                        eta = str(timedelta(seconds=int(eta_seconds)))
+
+                        progress["last_update"] = datetime.now().isoformat()
+                        progress["estimated_remaining"] = eta
+                        pipeline.save_enhancement_progress(chunks_id, progress)
+
+                        # Status display
+                        status_symbol = "✅" if success else "❌"
+                        print(f"{status_symbol} Chunk {result_chunk_num}/{total_chunks}: {message}")
+                        print(f"   Progress: {completed_count}/{len(chunks_needing_processing)} ({completed_count*100//len(chunks_needing_processing)}%) | "
+                              f"Active: {len(active_chunks)} | ETA: {eta}")
+
+                    except Exception as e:
+                        failed += 1
+                        completed_count += 1
+                        if chunk_num not in progress.get("failed_chunks", []):
+                            progress["failed_chunks"].append(chunk_num)
+                        progress["last_update"] = datetime.now().isoformat()
+                        pipeline.save_enhancement_progress(chunks_id, progress)
+                        print(f"❌ Chunk {chunk_num}/{total_chunks}: Exception: {e}")
+
+            except KeyboardInterrupt:
+                print("\n\n⚠️  Interrupted! Shutting down workers...")
+                executor.shutdown(wait=False, cancel_futures=True)
+                print("✓ Workers stopped. Progress has been saved.")
+                print(f"\n💡 Resume with: uv run python stage4_enhance_chunks.py --chunks-id {chunks_id} --resume")
+                return False
+
+    else:
+        # Serial processing (workers=1)
+        for i, (chunk_num, chunk_data) in enumerate(chunks_needing_processing, 1):
+            print(f"\n--- Chunk {chunk_num}/{total_chunks} ({i}/{len(chunks_needing_processing)}) ---")
+            result_chunk_num, success, message, proc_time = process_chunk_worker(
                 chunk_num,
+                chunk_data,
+                category,
                 total_chunks,
-                provider
+                provider_name,
+                chunks_id,
+                cache_dir or Path('cache')
             )
 
-            chunk_elapsed = time.time() - chunk_start
-
-            # Save chunk immediately
-            chunk_data = {
-                "chunk_id": chunk_num,
-                "original_title": chunk['title'],
-                "slug": chunk['slug'],
-                "enhanced_content": enhanced_content,
-                "enhancement_time": datetime.now().isoformat(),
-                "provider": provider_name,
-                "status": "completed",
-                "elapsed_seconds": int(chunk_elapsed)
-            }
-
-            pipeline.save_enhanced_chunk(chunks_id, chunk_num, chunk_data)
+            completed_count += 1
 
             # Update progress
-            if chunk_num not in progress.get("failed_chunks", []):
+            if success:
+                successful += 1
+                if result_chunk_num in progress.get("failed_chunks", []):
+                    progress["failed_chunks"].remove(result_chunk_num)
                 progress["completed_chunks"] = max(
                     progress.get("completed_chunks", 0),
-                    chunk_num
+                    result_chunk_num
                 )
             else:
-                # Remove from failed list
-                progress["failed_chunks"].remove(chunk_num)
-
-            progress["last_update"] = datetime.now().isoformat()
+                failed += 1
+                if result_chunk_num not in progress.get("failed_chunks", []):
+                    progress["failed_chunks"].append(result_chunk_num)
 
             # Calculate ETA
             elapsed = time.time() - start_time
-            avg_time_per_chunk = elapsed / i
-            remaining_chunks = len(chunks_to_process) - i
-            eta_seconds = remaining_chunks * avg_time_per_chunk
+            avg_time = elapsed / completed_count
+            remaining = len(chunks_needing_processing) - completed_count
+            eta_seconds = remaining * avg_time
             eta = str(timedelta(seconds=int(eta_seconds)))
 
-            progress["estimated_remaining"] = eta
-
-            pipeline.save_enhancement_progress(chunks_id, progress)
-
-            print(f"✅ Enhanced ({int(chunk_elapsed)}s)")
-            print(f"📊 ETA: {eta} | Avg: {int(avg_time_per_chunk)}s/chunk")
-
-            successful += 1
-
-        except Exception as e:
-            print(f"❌ Failed: {e}")
-
-            # Mark as failed
-            if chunk_num not in progress.get("failed_chunks", []):
-                progress["failed_chunks"].append(chunk_num)
-
             progress["last_update"] = datetime.now().isoformat()
+            progress["estimated_remaining"] = eta
             pipeline.save_enhancement_progress(chunks_id, progress)
 
-            failed += 1
-
-            # Continue with next chunk
-            continue
+            # Status display
+            status_symbol = "✅" if success else "❌"
+            print(f"{status_symbol} {message}")
+            print(f"   Progress: {completed_count}/{len(chunks_needing_processing)} | ETA: {eta}")
 
     # Final summary
     total_elapsed = time.time() - start_time
     print(f"\n{'='*60}")
     print(f"Enhancement Complete!")
     print(f"{'='*60}")
-    print(f"Successful: {successful}/{len(chunks_to_process)}")
-    print(f"Failed: {failed}/{len(chunks_to_process)}")
+    print(f"Successful: {successful}/{len(chunks_needing_processing)}")
+    print(f"Failed: {failed}/{len(chunks_needing_processing)}")
     print(f"Total time: {str(timedelta(seconds=int(total_elapsed)))}")
+    if workers > 1:
+        print(f"Workers: {workers} (avg {total_elapsed/len(chunks_needing_processing):.1f}s per chunk)")
 
     if failed > 0:
         print(f"\n⚠️  Some chunks failed. Retry with:")
-        print(f"   uv run python stage4_enhance_chunks.py --chunks-id {chunks_id} --retry-failed")
+        print(f"   uv run python stage4_enhance_chunks.py --chunks-id {chunks_id} --retry-failed --workers {workers}")
 
     if successful > 0:
         print(f"\n💡 Next step: uv run python stage5_generate_skill.py --enhanced-id {chunks_id}")
@@ -389,7 +540,7 @@ Examples:
     parser.add_argument(
         '--provider',
         type=str,
-        choices=['claude', 'gemini', 'codex'],
+        choices=['claude', 'gemini', 'codex', 'glm-api'],
         help='LLM provider to use (required unless --resume)'
     )
 
@@ -417,6 +568,15 @@ Examples:
         help='Cache directory (default: backend/cache/)'
     )
 
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=1,
+        choices=range(1, 9),
+        metavar='N',
+        help='Number of parallel workers (1-8, default: 1)'
+    )
+
     args = parser.parse_args()
 
     # Enhance chunks
@@ -427,7 +587,8 @@ Examples:
             resume=args.resume,
             retry_failed=args.retry_failed,
             force=args.force,
-            cache_dir=args.cache_dir
+            cache_dir=args.cache_dir,
+            workers=args.workers
         )
 
         return 0 if success else 1

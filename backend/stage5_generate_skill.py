@@ -86,16 +86,13 @@ def generate_skill_directory(
     print(f"✓ Classification: {category.value}")
 
     # Reconstruct ClassificationResult for SkillGenerator
-    from app.document_processor.content_classifier import ClassificationResult, SecondaryCategory, QualityMetrics
+    from app.document_processor.content_classifier import ClassificationResult, QualityMetrics
 
     classification = ClassificationResult(
         primary_category=category,
         confidence=classification_data.get("confidence", 0.85),
         secondary_categories=[
-            SecondaryCategory(
-                category=TaxCategory(sc["category"]),
-                confidence=sc["confidence"]
-            )
+            TaxCategory(sc["category"])
             for sc in classification_data.get("secondary_categories", [])
         ],
         quality_metrics=QualityMetrics(**classification_data.get("quality_metrics", {})),

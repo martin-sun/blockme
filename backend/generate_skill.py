@@ -181,6 +181,15 @@ Examples:
         help='Enhance SKILL.md with AI after generation (adds 3-5 minutes)'
     )
 
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=1,
+        choices=range(1, 9),
+        metavar='N',
+        help='Number of parallel workers for AI enhancement (1-8, default: 1). Use 4 for optimal speed.'
+    )
+
     # Cache options
     parser.add_argument(
         '--force-extract',
@@ -335,7 +344,8 @@ Examples:
     if not args.no_ai:
         stage4_args = [
             '--chunks-id', pdf_hash,
-            '--provider', provider_name
+            '--provider', provider_name,
+            '--workers', str(args.workers)
         ]
 
         # Check if we should resume

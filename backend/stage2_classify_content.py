@@ -104,11 +104,13 @@ def classify_content(
             for cat in classification.secondary_categories
         ],
         "quality_metrics": {
-            "structure_quality": classification.quality_metrics.structure_quality,
-            "content_depth": classification.quality_metrics.content_depth,
-            "keyword_coverage": classification.quality_metrics.keyword_coverage,
-            "specificity_score": classification.quality_metrics.specificity_score,
-            "completeness_score": classification.quality_metrics.completeness_score
+            "completeness": classification.quality_metrics.completeness,
+            "accuracy": classification.quality_metrics.accuracy,
+            "relevance": classification.quality_metrics.relevance,
+            "clarity": classification.quality_metrics.clarity,
+            "practicality": classification.quality_metrics.practicality,
+            "overall_score": classification.quality_metrics.overall_score,
+            "quality_grade": classification.quality_metrics.quality_grade
         },
         "matched_keywords": classification.matched_keywords,
         "classification_time": datetime.now().isoformat()
@@ -135,11 +137,12 @@ def classify_content(
 
     # Show quality metrics
     print(f"\n📊 Quality Metrics:")
-    print(f"   Structure quality: {classification.quality_metrics.structure_quality:.2f}")
-    print(f"   Content depth: {classification.quality_metrics.content_depth:.2f}")
-    print(f"   Keyword coverage: {classification.quality_metrics.keyword_coverage:.2f}")
-    print(f"   Specificity score: {classification.quality_metrics.specificity_score:.2f}")
-    print(f"   Completeness score: {classification.quality_metrics.completeness_score:.2f}")
+    print(f"   Completeness: {classification.quality_metrics.completeness:.2f}")
+    print(f"   Accuracy: {classification.quality_metrics.accuracy:.2f}")
+    print(f"   Relevance: {classification.quality_metrics.relevance:.2f}")
+    print(f"   Clarity: {classification.quality_metrics.clarity:.2f}")
+    print(f"   Practicality: {classification.quality_metrics.practicality:.2f}")
+    print(f"   Overall score: {classification.quality_metrics.overall_score:.2f} ({classification.quality_metrics.quality_grade})")
 
     print(f"\n💡 Next step: uv run python stage3_chunk_content.py --extraction-id {extraction_id}")
 

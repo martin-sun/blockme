@@ -1,0 +1,42 @@
+{
+  "stage": "classification",
+  "content_hash": "e600c619ce6adbe8",
+  "timestamp": "2025-11-04T11:43:06.594083",
+  "metadata": {
+    "primary_category": "credits",
+    "confidence": 0.6765848784278894
+  },
+  "data": {
+    "primary_category": "credits",
+    "confidence": 0.6765848784278894,
+    "secondary_categories": [
+      {
+        "category": "business_income",
+        "confidence": 0.6765848784278894
+      },
+      {
+        "category": "deductions",
+        "confidence": 0.6765848784278894
+      }
+    ],
+    "quality_metrics": {
+      "completeness": 1.0,
+      "accuracy": 1.0,
+      "relevance": 0.6,
+      "clarity": 0.7999999999999999,
+      "practicality": 0.8,
+      "overall_score": 0.86,
+      "quality_grade": "A"
+    },
+    "matched_keywords": [
+      "claim",
+      "credit",
+      "eligible",
+      "non-refundable",
+      "reduce tax",
+      "refundable",
+      "tax credit"
+    ],
+    "classification_time": "2025-11-04T11:43:06.594042"
+  }
+}

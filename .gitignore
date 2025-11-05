@@ -35,8 +35,8 @@ uploads/
 *.sqlite3
 
 # Pipeline cache (keep README.md)
-backend/cache/
-!backend/cache/README.md
+# backend/cache/
+# !backend/cache/README.md
 
 # Logs
 *.log
@@ -54,4 +54,4 @@ node_modules/
 tmp/
 temp/
 *.tmp
-skills_output/
+# skills_output/

@@ -259,15 +259,47 @@ class GeminiCLIProvider(LLMCLIProvider):
 
     def get_timeout(self, content_length: int) -> int:
         """
-        Calculate timeout for Gemini CLI.
+        Calculate timeout for Gemini CLI with optimized handling for large documents.
 
-        Gemini is typically faster than Claude but still needs time for generation.
-        Formula: max(180 seconds, 3 seconds per 1K characters)
-        For skill enhancement: ~3-4 minutes for 40K prompt
+        Timeout strategy:
+        - Small docs (<100K): 3 minutes minimum
+        - Medium docs (100K-500K): 2s per 1K chars
+        - Large docs (500K-1.5M): 3s per 1K chars (full document analysis)
+
+        Examples:
+        - 40K chars (skill enhancement): 180s (3 min)
+        - 300K chars (regular chunk): 600s (10 min)
+        - 721K chars (full doc analysis): 2163s (36 min)
+        - 1.5M chars (max input): 4500s (75 min)
+
+        The generous timeout for large documents accounts for:
+        - Complete document parsing
+        - Deep semantic analysis
+        - Chunk boundary identification
+        - Quality assessment
         """
-        MIN_TIMEOUT = 180  # 3 minutes minimum for skill enhancement
-        TIMEOUT_PER_1K_CHARS = 3  # Faster than Claude but still generous
-        return max(MIN_TIMEOUT, content_length // 1000 * TIMEOUT_PER_1K_CHARS)
+        if content_length < 100_000:
+            # Small documents: 3 minute minimum
+            MIN_TIMEOUT = 180
+            TIMEOUT_PER_1K = 2
+            return max(MIN_TIMEOUT, content_length // 1000 * TIMEOUT_PER_1K)
+
+        elif content_length < 500_000:
+            # Medium documents: faster processing
+            TIMEOUT_PER_1K = 2
+            return content_length // 1000 * TIMEOUT_PER_1K
+
+        else:
+            # Large documents (full doc analysis): generous timeout
+            # 721K → 36 min, 1.5M → 75 min
+            TIMEOUT_PER_1K = 3
+            timeout = content_length // 1000 * TIMEOUT_PER_1K
+
+            # Add extra buffer for very large docs (>1M)
+            if content_length > 1_000_000:
+                timeout = int(timeout * 1.1)  # +10% safety margin
+
+            return timeout
 
     def uses_stdin(self) -> bool:
         """Gemini CLI uses command argument for prompt (not stdin)."""

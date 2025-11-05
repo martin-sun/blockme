@@ -11,9 +11,6 @@ This script orchestrates the 5-stage processing pipeline:
 6. SKILL.md Enhancement (optional)
 
 Usage:
-    # Basic processing (no AI enhancement)
-    uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --no-ai
-
     # With local Codex (recommended)
     uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --local-codex
 
@@ -102,10 +99,10 @@ Caching & Resumability:
   - Use different --max-pages to force re-extraction
 
 Examples:
-  # Quick test (10 pages, no AI)
-  python generate_skill.py --pdf FILE.pdf --no-ai
+  # Quick test (10 pages)
+  python generate_skill.py --pdf FILE.pdf --local-gemini
 
-  # Full processing with AI (151 pages, 7-11 hours)
+  # Full processing (151 pages, 7-11 hours)
   python generate_skill.py --pdf FILE.pdf --local-codex --full
 
   # Resume interrupted enhancement
@@ -144,12 +141,6 @@ Examples:
     )
 
     # LLM provider options
-    parser.add_argument(
-        '--no-ai',
-        action='store_true',
-        help='Skip AI enhancement (stages 4-6 use original content)'
-    )
-
     parser.add_argument(
         '--local-claude',
         action='store_true',
@@ -198,6 +189,12 @@ Examples:
     )
 
     parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Force re-processing of all stages (ignore all caches)'
+    )
+
+    parser.add_argument(
         '--cache-dir',
         type=Path,
         help='Cache directory (default: backend/cache/)'
@@ -217,32 +214,37 @@ Examples:
     print(f"📁 Output: {args.output_dir}")
     print(f"📦 Pages: {'All' if args.full else f'First {args.max_pages}'}")
 
-    # Determine provider
+    # Determine provider for Stage 4
     provider_name = None
-    if not args.no_ai:
-        if args.local_claude:
-            provider_name = 'claude'
-        elif args.local_gemini:
-            provider_name = 'gemini'
-        elif args.local_codex:
-            provider_name = 'codex'
-        elif args.glm_api:
-            provider_name = 'glm-api'
-        else:
-            print("\n❌ Error: Must specify LLM provider or use --no-ai")
-            print("   Options: --local-claude, --local-gemini, --local-codex, --glm-api, --no-ai")
-            return 1
-
-        # Verify provider available
-        provider = get_provider(provider_name)
-        if not provider:
-            print(f"\n❌ Error: Provider '{provider_name}' not available")
-            print(f"   Check that the CLI is installed and in PATH")
-            return 1
-
-        print(f"🤖 Provider: {provider_name}")
+    if args.local_claude:
+        provider_name = 'claude'
+    elif args.local_gemini:
+        provider_name = 'gemini'
+    elif args.local_codex:
+        provider_name = 'codex'
+    elif args.glm_api:
+        provider_name = 'glm-api'
     else:
-        print(f"🤖 Provider: None (--no-ai)")
+        print("\n❌ Error: Must specify LLM provider")
+        print("   Options: --local-claude, --local-gemini, --local-codex, --glm-api")
+        return 1
+
+    # Verify Stage 4 provider available
+    provider = get_provider(provider_name)
+    if not provider:
+        print(f"\n❌ Error: Provider '{provider_name}' not available")
+        print(f"   Check that the CLI is installed and in PATH")
+        return 1
+
+    # Verify Gemini is available for Stage 2 (always required)
+    gemini_provider = get_provider('gemini')
+    if not gemini_provider:
+        print(f"\n❌ Error: Gemini CLI is required for Stage 2 classification")
+        print("   Install: npm install -g @google/generative-ai-cli")
+        return 1
+
+    print(f"🤖 Stage 2 Provider: gemini (semantic classification)")
+    print(f"🤖 Stage 4 Provider: {provider_name} (chunk enhancement)")
 
     # Calculate PDF hash for cache
     cache_mgr = CacheManager(args.cache_dir)
@@ -305,6 +307,13 @@ Examples:
         '--extraction-id', pdf_hash
     ]
 
+    # Stage 2 always uses Gemini for semantic classification
+    stage2_args.extend(['--provider', 'gemini'])
+
+    # Pass force flag
+    if args.force or args.force_extract:
+        stage2_args.append('--force')
+
     if args.cache_dir:
         stage2_args.extend(['--cache-dir', str(args.cache_dir)])
 
@@ -325,6 +334,10 @@ Examples:
         '--extraction-id', pdf_hash
     ]
 
+    # Pass force flag
+    if args.force or args.force_extract:
+        stage3_args.append('--force')
+
     if args.cache_dir:
         stage3_args.extend(['--cache-dir', str(args.cache_dir)])
 
@@ -339,46 +352,39 @@ Examples:
         return 1
 
     # ========================================
-    # Stage 4: AI Enhancement (optional)
+    # Stage 4: AI Enhancement
     # ========================================
-    if not args.no_ai:
-        stage4_args = [
-            '--chunks-id', pdf_hash,
-            '--provider', provider_name,
-            '--workers', str(args.workers)
-        ]
+    stage4_args = [
+        '--chunks-id', pdf_hash,
+        '--provider', provider_name,
+        '--workers', str(args.workers)
+    ]
 
-        # Check if we should resume
-        if cache_status.get(PipelineStage.ENHANCEMENT):
-            progress = pipeline.get_enhancement_progress(pdf_hash)
-            if progress:
-                completed = progress.get("completed_chunks", 0)
-                total = progress.get("total_chunks", 0)
-                if completed > 0 and completed < total:
-                    print(f"\n💡 Detected incomplete enhancement ({completed}/{total} chunks)")
-                    print(f"   Will resume from chunk {completed + 1}")
-                    stage4_args.append('--resume')
+    # Check if we should resume
+    if cache_status.get(PipelineStage.ENHANCEMENT):
+        progress = pipeline.get_enhancement_progress(pdf_hash)
+        if progress:
+            completed = progress.get("completed_chunks", 0)
+            total = progress.get("total_chunks", 0)
+            if completed > 0 and completed < total:
+                print(f"\n💡 Detected incomplete enhancement ({completed}/{total} chunks)")
+                print(f"   Will resume from chunk {completed + 1}")
+                stage4_args.append('--resume')
 
-        if args.cache_dir:
-            stage4_args.extend(['--cache-dir', str(args.cache_dir)])
+    if args.cache_dir:
+        stage4_args.extend(['--cache-dir', str(args.cache_dir)])
 
-        success = run_stage_script(
-            'stage4_enhance_chunks.py',
-            stage4_args,
-            'Stage 4: AI Enhancement'
-        )
+    success = run_stage_script(
+        'stage4_enhance_chunks.py',
+        stage4_args,
+        'Stage 4: AI Enhancement'
+    )
 
-        if not success:
-            print("\n❌ Pipeline failed at Stage 4")
-            print("\n💡 You can resume enhancement later with:")
-            print(f"   uv run python stage4_enhance_chunks.py --chunks-id {pdf_hash} --resume")
-            return 1
-    else:
-        print(f"\n{'='*60}")
-        print("Stage 4: AI Enhancement")
-        print(f"{'='*60}")
-        print("⏭️  Skipped (--no-ai)")
-        print("   Will use original content without enhancement")
+    if not success:
+        print("\n❌ Pipeline failed at Stage 4")
+        print("\n💡 You can resume enhancement later with:")
+        print(f"   uv run python stage4_enhance_chunks.py --chunks-id {pdf_hash} --resume")
+        return 1
 
     # ========================================
     # Stage 5: Generate Skill Directory
@@ -421,17 +427,10 @@ Examples:
         # ========================================
         # Stage 6: SKILL.md Enhancement (optional)
         # ========================================
-        if args.enhance_skill and provider_name:
+        if args.enhance_skill:
             print(f"\n{'='*60}")
             print("Stage 6: SKILL.md Enhancement")
             print(f"{'='*60}")
-
-            enhance_args = [
-                'python',
-                'enhance_skill.py',
-                '--skill-dir', str(skill_dir),
-                '--provider', provider_name
-            ]
 
             success = run_stage_script(
                 'enhance_skill.py',

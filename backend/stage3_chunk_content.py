@@ -2,14 +2,18 @@
 """
 Stage 3: Content Chunking
 
-Detects chapters and splits content into structured chunks.
+Executes semantic chunking based on Stage 2 analysis (if available) or
+falls back to traditional chapter detection.
 
 Usage:
-    # Basic usage
+    # Basic usage (uses Gemini semantic boundaries from Stage 2)
     uv run python stage3_chunk_content.py --extraction-id abc123
 
     # Force re-chunking (ignore cache)
     uv run python stage3_chunk_content.py --extraction-id abc123 --force
+
+    # Force legacy chapter detection (ignore semantic boundaries)
+    uv run python stage3_chunk_content.py --extraction-id abc123 --legacy
 
     # Custom chunk size
     uv run python stage3_chunk_content.py --extraction-id abc123 --max-chunk-size 500000
@@ -286,11 +290,46 @@ def split_by_chapters(content: str, max_chunk_size: int) -> list[dict]:
     return structured_chunks
 
 
+def execute_semantic_chunking(content: str, chunks_preview: list[dict]) -> list[dict]:
+    """
+    Execute chunking based on semantic boundaries from Stage 2 (Gemini analysis).
+
+    Args:
+        content: Full document content
+        chunks_preview: List of chunk boundaries from Stage 2
+
+    Returns:
+        List of chunk dicts with content and metadata
+    """
+    chunks = []
+
+    for preview in chunks_preview:
+        start_pos = preview['start_pos']
+        end_pos = preview['end_pos']
+
+        # Extract actual content
+        chunk_content = content[start_pos:end_pos].strip()
+
+        chunks.append({
+            'content': chunk_content,
+            'title': preview['title'],
+            'slug': _slugify(preview['title']),
+            'chapter_num': preview['chunk_id'],
+            'char_count': len(chunk_content),
+            'primary_topic': preview.get('primary_topic', ''),
+            'semantic_coherence': preview.get('semantic_coherence', 0.85)
+        })
+
+    logger.info(f"Executed semantic chunking: {len(chunks)} chunks")
+    return chunks
+
+
 def chunk_content(
     extraction_id: str,
     max_chunk_size: int = MAX_CHUNK_SIZE,
     force: bool = False,
-    cache_dir: Path = None
+    cache_dir: Path = None,
+    use_semantic: bool = True
 ) -> dict:
     """
     Chunk extracted content with caching.
@@ -300,6 +339,7 @@ def chunk_content(
         max_chunk_size: Maximum characters per chunk
         force: Force re-chunking even if cached
         cache_dir: Cache directory path
+        use_semantic: Use semantic boundaries from Stage 2 if available (default: True)
 
     Returns:
         Chunking data dict
@@ -337,16 +377,38 @@ def chunk_content(
     cleaned_content = clean_content(total_text)
     print(f"   Cleaned: {len(cleaned_content):,} chars")
 
+    # Check for semantic boundaries from Stage 2
+    classification_data = None
+    chunks_preview = None
+    chunking_strategy = "chapter_detection"
+
+    if use_semantic:
+        classification_data = cache_mgr.load_cache(PipelineStage.CLASSIFICATION, extraction_id)
+        if classification_data and 'chunks_preview' in classification_data:
+            chunks_preview = classification_data['chunks_preview']
+            print(f"\n🔮 Found semantic boundaries from Stage 2")
+            print(f"   Method: {classification_data.get('method', 'unknown')}")
+            print(f"   Chunks identified: {len(chunks_preview)}")
+
     # Split into chunks
-    print(f"\n✂️  Splitting into chunks...")
-    chunks = split_by_chapters(cleaned_content, max_chunk_size)
+    if chunks_preview:
+        print(f"\n✂️  Executing semantic chunking...")
+        chunks = execute_semantic_chunking(cleaned_content, chunks_preview)
+        chunking_strategy = "semantic_boundaries"
+    else:
+        if use_semantic:
+            print(f"\n⚠️  No semantic boundaries found, falling back to chapter detection")
+        print(f"\n✂️  Splitting by chapter detection...")
+        chunks = split_by_chapters(cleaned_content, max_chunk_size)
+        chunking_strategy = "chapter_detection"
 
     # Prepare chunking data
     chunking_data = {
         "total_chunks": len(chunks),
         "chunks": chunks,
         "max_chunk_size": max_chunk_size,
-        "chunking_strategy": "chapter_detection",
+        "chunking_strategy": chunking_strategy,
+        "used_semantic_boundaries": chunks_preview is not None,
         "chunking_time": datetime.now().isoformat()
     }
 
@@ -363,6 +425,7 @@ def chunk_content(
     )
 
     print(f"\n✅ Chunking complete!")
+    print(f"   Strategy: {chunking_strategy}")
     print(f"   Total chunks: {len(chunks)}")
     print(f"   Avg chunk size: {len(cleaned_content) // len(chunks):,} chars")
     print(f"   Cache: {cache_path}")
@@ -370,7 +433,10 @@ def chunk_content(
     # Show chunk summary
     print(f"\n📊 Chunk Summary:")
     for i, chunk in enumerate(chunks[:5], 1):
-        print(f"   {i}. {chunk['title'][:50]:<50} ({chunk['char_count']:>8,} chars)")
+        semantic_info = ""
+        if 'semantic_coherence' in chunk:
+            semantic_info = f" [coherence: {chunk['semantic_coherence']:.2f}]"
+        print(f"   {i}. {chunk['title'][:50]:<50} ({chunk['char_count']:>8,} chars){semantic_info}")
     if len(chunks) > 5:
         print(f"   ... and {len(chunks) - 5} more")
 
@@ -381,15 +447,18 @@ def chunk_content(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Stage 3: Split content into structured chunks',
+        description='Stage 3: Execute semantic chunking or fall back to chapter detection',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Chunk content
+  # Semantic chunking (uses Stage 2 analysis)
   python stage3_chunk_content.py --extraction-id abc123
 
   # Force re-chunking
   python stage3_chunk_content.py --extraction-id abc123 --force
+
+  # Legacy chapter detection (ignore Stage 2)
+  python stage3_chunk_content.py --extraction-id abc123 --legacy
 
   # Custom chunk size
   python stage3_chunk_content.py --extraction-id abc123 --max-chunk-size 500000
@@ -417,6 +486,12 @@ Examples:
     )
 
     parser.add_argument(
+        '--legacy',
+        action='store_true',
+        help='Use legacy chapter detection (ignore semantic boundaries from Stage 2)'
+    )
+
+    parser.add_argument(
         '--cache-dir',
         type=Path,
         help='Cache directory (default: backend/cache/)'
@@ -430,7 +505,8 @@ Examples:
             args.extraction_id,
             max_chunk_size=args.max_chunk_size,
             force=args.force,
-            cache_dir=args.cache_dir
+            cache_dir=args.cache_dir,
+            use_semantic=not args.legacy
         )
 
         if chunking_data is None:

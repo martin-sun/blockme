@@ -2,18 +2,24 @@
 """
 Stage 3: Content Chunking
 
-Executes semantic chunking based on Stage 2 analysis (if available) or
-falls back to traditional chapter detection.
+Executes TOC-based chunking using Stage 2 analysis (if available) or
+falls back to pattern matching chapter detection.
+
+Features:
+- TOC-based chunking with hierarchy support (level, hierarchy_path, parent_title)
+- Smart merging of small chunks
+- Pattern matching fallback for documents without TOC
+- Supports Claude Skills best practices with hierarchical structure
 
 Usage:
-    # Basic usage (uses Gemini semantic boundaries from Stage 2)
+    # Basic usage (uses TOC from Stage 2)
     uv run python stage3_chunk_content.py --extraction-id abc123
 
     # Force re-chunking (ignore cache)
     uv run python stage3_chunk_content.py --extraction-id abc123 --force
 
-    # Force legacy chapter detection (ignore semantic boundaries)
-    uv run python stage3_chunk_content.py --extraction-id abc123 --legacy
+    # Skip TOC and use pattern matching
+    uv run python stage3_chunk_content.py --extraction-id abc123 --no-toc
 
     # Custom chunk size
     uv run python stage3_chunk_content.py --extraction-id abc123 --max-chunk-size 500000
@@ -236,14 +242,14 @@ def split_content_into_chunks(content: str, max_chunk_size: int) -> list[str]:
 
 def split_by_chapters(content: str, max_chunk_size: int) -> list[dict]:
     """
-    Split content by chapter boundaries with smart chunking.
+    Split content by chapter boundaries with smart chunking (pattern matching fallback).
 
     Args:
         content: Full content to split
         max_chunk_size: Maximum size per chunk
 
     Returns:
-        List of chunk dicts with metadata
+        List of chunk dicts with metadata (includes basic hierarchy fields)
     """
     chapters = detect_chapters(content)
 
@@ -255,7 +261,11 @@ def split_by_chapters(content: str, max_chunk_size: int) -> list[dict]:
             'title': f'Section {i+1}',
             'slug': f'section-{i+1}',
             'chapter_num': i + 1,
-            'char_count': len(chunk)
+            'char_count': len(chunk),
+            'toc_level': 1,
+            'hierarchy_path': f'Section {i+1}',
+            'parent_title': None,
+            'chunking_method': 'pattern'
         } for i, chunk in enumerate(chunks_list)]
 
     # Split by chapters
@@ -276,7 +286,11 @@ def split_by_chapters(content: str, max_chunk_size: int) -> list[dict]:
                     'title': f"{chapter['title']} (Part {j+1})",
                     'slug': f"{chapter['slug']}-part-{j+1}",
                     'chapter_num': len(structured_chunks) + 1,
-                    'char_count': len(sub_chunk)
+                    'char_count': len(sub_chunk),
+                    'toc_level': chapter['level'],
+                    'hierarchy_path': f"{chapter['title']} (Part {j+1})",
+                    'parent_title': None,
+                    'chunking_method': 'pattern'
                 })
         else:
             structured_chunks.append({
@@ -284,43 +298,146 @@ def split_by_chapters(content: str, max_chunk_size: int) -> list[dict]:
                 'title': chapter['title'],
                 'slug': chapter['slug'],
                 'chapter_num': len(structured_chunks) + 1,
-                'char_count': len(chapter_content)
+                'char_count': len(chapter_content),
+                'toc_level': chapter['level'],
+                'hierarchy_path': chapter['title'],
+                'parent_title': None,
+                'chunking_method': 'pattern'
             })
 
     return structured_chunks
 
 
-def execute_semantic_chunking(content: str, chunks_preview: list[dict]) -> list[dict]:
+def chunk_by_toc(
+    content: str,
+    toc_entries: list[dict],
+    max_level: int = 2,
+    min_chunk_size: int = 10000
+) -> list[dict]:
     """
-    Execute chunking based on semantic boundaries from Stage 2 (Gemini analysis).
+    Chunk content based on TOC entries with hierarchy support.
+
+    Strategy:
+    - Use TOC entries with level <= max_level as chunk boundaries
+    - Filter out chunks smaller than min_chunk_size
+    - Merge adjacent small chunks
+    - Add hierarchy path information (e.g., "Chapter 3 > Section 3.1")
 
     Args:
         content: Full document content
-        chunks_preview: List of chunk boundaries from Stage 2
+        toc_entries: List of TOC entries from Stage 2
+        max_level: Maximum level to use for chunking (default: 2)
+        min_chunk_size: Minimum chunk size in characters (default: 10000)
 
     Returns:
-        List of chunk dicts with content and metadata
+        List of chunk dicts with hierarchy metadata
     """
     chunks = []
 
-    for preview in chunks_preview:
-        start_pos = preview['start_pos']
-        end_pos = preview['end_pos']
+    # Filter TOC entries by max_level and sort by char_start
+    valid_entries = [
+        entry for entry in toc_entries
+        if entry.get('level', 1) <= max_level and entry.get('char_start') is not None
+    ]
+    valid_entries.sort(key=lambda x: x.get('char_start', 0))
 
-        # Extract actual content
-        chunk_content = content[start_pos:end_pos].strip()
+    if not valid_entries:
+        logger.warning("No valid TOC entries found for chunking")
+        return []
+
+    # Build hierarchy paths
+    # Track parent titles at each level
+    level_stack = {}  # {level: title}
+
+    for i, entry in enumerate(valid_entries):
+        level = entry.get('level', 1)
+        title = entry.get('title', f'Section {i+1}')
+        char_start = entry.get('char_start', 0)
+        char_end = entry.get('char_end')
+
+        # Update level stack (remove deeper levels)
+        level_stack = {k: v for k, v in level_stack.items() if k < level}
+        level_stack[level] = title
+
+        # Build hierarchy path
+        hierarchy_parts = [level_stack[l] for l in sorted(level_stack.keys())]
+        hierarchy_path = ' > '.join(hierarchy_parts)
+
+        # Find parent title (immediate parent level)
+        parent_title = None
+        if level > 1:
+            parent_level = level - 1
+            while parent_level >= 1:
+                if parent_level in level_stack:
+                    parent_title = level_stack[parent_level]
+                    break
+                parent_level -= 1
+
+        # Determine end position
+        if char_end is not None:
+            end_pos = char_end
+        elif i + 1 < len(valid_entries):
+            end_pos = valid_entries[i + 1].get('char_start', len(content))
+        else:
+            end_pos = len(content)
+
+        # Extract content
+        chunk_content = content[char_start:end_pos].strip()
+
+        if not chunk_content:
+            continue
 
         chunks.append({
             'content': chunk_content,
-            'title': preview['title'],
-            'slug': _slugify(preview['title']),
-            'chapter_num': preview['chunk_id'],
+            'title': title,
+            'slug': _slugify(title),
+            'chapter_num': len(chunks) + 1,
             'char_count': len(chunk_content),
-            'primary_topic': preview.get('primary_topic', ''),
-            'semantic_coherence': preview.get('semantic_coherence', 0.85)
+            'toc_level': level,
+            'hierarchy_path': hierarchy_path,
+            'parent_title': parent_title,
+            'chunking_method': 'toc',
+            'char_start': char_start,
+            'char_end': end_pos
         })
 
-    logger.info(f"Executed semantic chunking: {len(chunks)} chunks")
+    # Merge small chunks
+    if min_chunk_size > 0:
+        merged_chunks = []
+        pending_merge = None
+
+        for chunk in chunks:
+            if chunk['char_count'] < min_chunk_size:
+                if pending_merge is None:
+                    pending_merge = chunk.copy()
+                else:
+                    # Merge with pending
+                    pending_merge['content'] += '\n\n' + chunk['content']
+                    pending_merge['title'] += f" + {chunk['title']}"
+                    pending_merge['slug'] = _slugify(pending_merge['title'])
+                    pending_merge['char_count'] = len(pending_merge['content'])
+                    pending_merge['char_end'] = chunk['char_end']
+                    pending_merge['hierarchy_path'] += f" / {chunk['hierarchy_path']}"
+            else:
+                # Chunk is large enough
+                if pending_merge is not None:
+                    # Flush pending merge
+                    merged_chunks.append(pending_merge)
+                    pending_merge = None
+                merged_chunks.append(chunk)
+
+        # Flush final pending merge
+        if pending_merge is not None:
+            merged_chunks.append(pending_merge)
+
+        # Renumber chapters
+        for i, chunk in enumerate(merged_chunks, 1):
+            chunk['chapter_num'] = i
+
+        logger.info(f"TOC chunking: {len(chunks)} initial chunks, {len(merged_chunks)} after merging small chunks")
+        chunks = merged_chunks
+
+    logger.info(f"Generated {len(chunks)} chunks from TOC entries")
     return chunks
 
 
@@ -377,30 +494,43 @@ def chunk_content(
     cleaned_content = clean_content(total_text)
     print(f"   Cleaned: {len(cleaned_content):,} chars")
 
-    # Check for semantic boundaries from Stage 2
+    # Load classification data (contains TOC from Stage 2)
     classification_data = None
-    chunks_preview = None
-    chunking_strategy = "chapter_detection"
+    toc_data = None
+    chunking_strategy = "pattern_matching"
 
     if use_semantic:
         classification_data = cache_mgr.load_cache(PipelineStage.CLASSIFICATION, extraction_id)
-        if classification_data and 'chunks_preview' in classification_data:
-            chunks_preview = classification_data['chunks_preview']
-            print(f"\n🔮 Found semantic boundaries from Stage 2")
-            print(f"   Method: {classification_data.get('method', 'unknown')}")
-            print(f"   Chunks identified: {len(chunks_preview)}")
+        if classification_data and 'toc' in classification_data:
+            toc_data = classification_data['toc']
+            if toc_data.get('has_toc') and toc_data.get('entries'):
+                print(f"\n📋 Found TOC from Stage 2")
+                print(f"   Source: {toc_data.get('source', 'unknown')}")
+                print(f"   Max level: {toc_data.get('max_level', 'unknown')}")
+                print(f"   TOC entries: {len(toc_data['entries'])}")
 
     # Split into chunks
-    if chunks_preview:
-        print(f"\n✂️  Executing semantic chunking...")
-        chunks = execute_semantic_chunking(cleaned_content, chunks_preview)
-        chunking_strategy = "semantic_boundaries"
+    if toc_data and toc_data.get('has_toc') and toc_data.get('entries'):
+        print(f"\n✂️  Executing TOC-based chunking...")
+        chunks = chunk_by_toc(
+            cleaned_content,
+            toc_data['entries'],
+            max_level=2,
+            min_chunk_size=10000
+        )
+        chunking_strategy = "toc_based"
+
+        # Fallback to pattern matching if TOC chunking failed
+        if not chunks:
+            print(f"\n⚠️  TOC chunking produced no chunks, falling back to pattern matching")
+            chunks = split_by_chapters(cleaned_content, max_chunk_size)
+            chunking_strategy = "pattern_matching"
     else:
         if use_semantic:
-            print(f"\n⚠️  No semantic boundaries found, falling back to chapter detection")
-        print(f"\n✂️  Splitting by chapter detection...")
+            print(f"\n⚠️  No TOC found in Stage 2, falling back to pattern matching")
+        print(f"\n✂️  Splitting by pattern matching...")
         chunks = split_by_chapters(cleaned_content, max_chunk_size)
-        chunking_strategy = "chapter_detection"
+        chunking_strategy = "pattern_matching"
 
     # Prepare chunking data
     chunking_data = {
@@ -408,7 +538,8 @@ def chunk_content(
         "chunks": chunks,
         "max_chunk_size": max_chunk_size,
         "chunking_strategy": chunking_strategy,
-        "used_semantic_boundaries": chunks_preview is not None,
+        "used_toc": toc_data is not None and toc_data.get('has_toc', False),
+        "toc_source": toc_data.get('source') if toc_data else None,
         "chunking_time": datetime.now().isoformat()
     }
 
@@ -433,10 +564,12 @@ def chunk_content(
     # Show chunk summary
     print(f"\n📊 Chunk Summary:")
     for i, chunk in enumerate(chunks[:5], 1):
-        semantic_info = ""
-        if 'semantic_coherence' in chunk:
-            semantic_info = f" [coherence: {chunk['semantic_coherence']:.2f}]"
-        print(f"   {i}. {chunk['title'][:50]:<50} ({chunk['char_count']:>8,} chars){semantic_info}")
+        hierarchy_info = ""
+        if 'toc_level' in chunk:
+            hierarchy_info = f" [L{chunk['toc_level']}]"
+            if chunk.get('hierarchy_path'):
+                hierarchy_info += f" {chunk['hierarchy_path'][:60]}"
+        print(f"   {i}. {chunk['title'][:40]:<40} ({chunk['char_count']:>8,} chars){hierarchy_info}")
     if len(chunks) > 5:
         print(f"   ... and {len(chunks) - 5} more")
 
@@ -447,18 +580,18 @@ def chunk_content(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Stage 3: Execute semantic chunking or fall back to chapter detection',
+        description='Stage 3: Execute TOC-based chunking or fall back to pattern matching',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Semantic chunking (uses Stage 2 analysis)
+  # TOC-based chunking (uses Stage 2 TOC)
   python stage3_chunk_content.py --extraction-id abc123
 
   # Force re-chunking
   python stage3_chunk_content.py --extraction-id abc123 --force
 
-  # Legacy chapter detection (ignore Stage 2)
-  python stage3_chunk_content.py --extraction-id abc123 --legacy
+  # Pattern matching (ignore Stage 2 TOC)
+  python stage3_chunk_content.py --extraction-id abc123 --no-toc
 
   # Custom chunk size
   python stage3_chunk_content.py --extraction-id abc123 --max-chunk-size 500000
@@ -486,9 +619,9 @@ Examples:
     )
 
     parser.add_argument(
-        '--legacy',
+        '--no-toc',
         action='store_true',
-        help='Use legacy chapter detection (ignore semantic boundaries from Stage 2)'
+        help='Use pattern matching chapter detection (ignore TOC from Stage 2)'
     )
 
     parser.add_argument(
@@ -506,7 +639,7 @@ Examples:
             max_chunk_size=args.max_chunk_size,
             force=args.force,
             cache_dir=args.cache_dir,
-            use_semantic=not args.legacy
+            use_semantic=not args.no_toc
         )
 
         if chunking_data is None:

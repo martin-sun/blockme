@@ -236,14 +236,15 @@ Examples:
         print(f"   Check that the CLI is installed and in PATH")
         return 1
 
-    # Verify Gemini is available for Stage 2 (always required)
-    gemini_provider = get_provider('gemini')
-    if not gemini_provider:
-        print(f"\n❌ Error: Gemini CLI is required for Stage 2 classification")
-        print("   Install: npm install -g @google/generative-ai-cli")
+    # Verify Gemini API is available for Stage 2 (always required)
+    gemini_api_provider = get_provider('gemini-api')
+    if not gemini_api_provider or not gemini_api_provider.is_available():
+        print(f"\n❌ Error: Gemini API is required for Stage 2 classification")
+        print("   Set GEMINI_API_KEY environment variable in backend/.env")
+        print("   Install: pip install google-generativeai")
         return 1
 
-    print(f"🤖 Stage 2 Provider: gemini (semantic classification)")
+    print(f"🤖 Stage 2 Provider: gemini-api (semantic classification)")
     print(f"🤖 Stage 4 Provider: {provider_name} (chunk enhancement)")
 
     # Calculate PDF hash for cache
@@ -307,8 +308,8 @@ Examples:
         '--extraction-id', pdf_hash
     ]
 
-    # Stage 2 always uses Gemini for semantic classification
-    stage2_args.extend(['--provider', 'gemini'])
+    # Stage 2 always uses Gemini API for semantic classification
+    stage2_args.extend(['--provider', 'gemini-api'])
 
     # Pass force flag
     if args.force or args.force_extract:

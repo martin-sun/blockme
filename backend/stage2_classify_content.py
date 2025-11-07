@@ -56,13 +56,13 @@ def classify_content(
     # Initialize cache manager
     cache_mgr = CacheManager(cache_dir)
 
-    # Always use Gemini for semantic analysis
-    provider = 'gemini'
+    # Always use Gemini API for semantic analysis
+    provider = 'gemini-api'
     print(f"\n{'='*60}")
     print(f"Stage 2: Content Classification")
     print(f"{'='*60}")
     print(f"Extraction ID: {extraction_id}")
-    print(f"Method: Gemini Semantic Analysis")
+    print(f"Method: Gemini API Semantic Analysis")
 
     # Load extraction data
     extraction_data = cache_mgr.load_cache(PipelineStage.EXTRACTION, extraction_id)
@@ -95,14 +95,14 @@ def classify_content(
         processor = GeminiSmartProcessor(provider_name=provider)
         pdf_title = extraction_data.get('pdf_path', '').split('/')[-1]
 
-        # Perform full document analysis (classification + chunking)
+        # Perform full document analysis (classification + TOC generation)
         analysis: DocumentAnalysis = processor.analyze_full_document(
             content=total_text,
             title=pdf_title,
             max_chunk_size=max_chunk_size
         )
 
-        # Prepare classification data with chunks preview
+        # Prepare classification data with TOC
         classification_data = {
             "primary_category": analysis.classification.primary_category.value,
             "confidence": analysis.classification.confidence,
@@ -118,19 +118,22 @@ def classify_content(
             "model": analysis.model,
             "processing_time": analysis.processing_time,
 
-            # NEW: Include chunks preview for Stage 3
-            "chunks_preview": [
-                {
-                    "chunk_id": chunk.chunk_id,
-                    "title": chunk.title,
-                    "start_pos": chunk.start_pos,
-                    "end_pos": chunk.end_pos,
-                    "length": chunk.length,
-                    "primary_topic": chunk.primary_topic,
-                    "semantic_coherence": chunk.semantic_coherence
-                }
-                for chunk in analysis.chunks
-            ],
+            # NEW: Include TOC structure for Stage 3
+            "toc": {
+                "has_toc": analysis.toc.has_toc,
+                "source": analysis.toc.source,
+                "max_level": analysis.toc.max_level,
+                "entries": [
+                    {
+                        "level": entry.level,
+                        "title": entry.title,
+                        "page_number": entry.page_number,
+                        "char_start": entry.char_start,
+                        "char_end": entry.char_end
+                    }
+                    for entry in analysis.toc.entries
+                ]
+            },
 
             # Quality metrics (if provided by LLM)
             "quality_metrics": {
@@ -165,8 +168,8 @@ def classify_content(
         extraction_id,
         classification_data,
         metadata={
-            "primary_category": classification.primary_category.value,
-            "confidence": classification.confidence
+            "primary_category": analysis.classification.primary_category.value,
+            "confidence": analysis.classification.confidence
         }
     )
 
@@ -175,8 +178,7 @@ def classify_content(
     print(f"   Confidence: {classification_data['confidence']:.2f}")
     print(f"   Method: {classification_data.get('method', 'gemini_semantic')}")
     print(f"   Model: {classification_data.get('model', 'N/A')}")
-    print(f"   Processing time: {classification_data.get('processing_time', 0):.1f}s")
-    print(f"   Chunks identified: {len(classification_data.get('chunks_preview', []))}")
+    print(f"   Processing_time: {classification_data.get('processing_time', 0):.1f}s")
     if 'reasoning' in classification_data:
         print(f"   Reasoning: {classification_data['reasoning'][:100]}...")
     print(f"   Cache: {cache_path}")
@@ -191,15 +193,22 @@ def classify_content(
     print(f"   Practicality: {qm.get('practicality', 0):.2f}")
     print(f"   Overall score: {qm.get('overall_score', 0):.2f} ({qm.get('quality_grade', 'N/A')})")
 
-    # Show chunks preview
-    if 'chunks_preview' in classification_data:
-        print(f"\n📦 Semantic Chunks Preview:")
-        for chunk in classification_data['chunks_preview'][:5]:  # Show first 5
-            print(f"   {chunk['chunk_id']}. {chunk['title']}")
-            print(f"      Range: {chunk['start_pos']:,}-{chunk['end_pos']:,} ({chunk['length']:,} chars)")
-            print(f"      Topic: {chunk['primary_topic']}")
-        if len(classification_data['chunks_preview']) > 5:
-            print(f"   ... and {len(classification_data['chunks_preview']) - 5} more chunks")
+    # Show TOC structure
+    toc_data = classification_data.get('toc', {})
+    print(f"\n📋 Document Structure (TOC):")
+    print(f"   Has TOC: {toc_data.get('has_toc', False)}")
+    print(f"   Source: {toc_data.get('source', 'N/A')}")
+    print(f"   Max Level: {toc_data.get('max_level', 0)}")
+    print(f"   Total Entries: {len(toc_data.get('entries', []))}")
+
+    if toc_data.get('entries'):
+        print(f"\n   Structure Preview:")
+        for i, entry in enumerate(toc_data['entries'][:10]):  # Show first 10
+            indent = "  " * (entry['level'] - 1)
+            char_range = f"{entry.get('char_start', 0):,}-{entry.get('char_end', 0):,}" if entry.get('char_start') is not None else "N/A"
+            print(f"   {indent}L{entry['level']}: {entry['title']} (p.{entry['page_number']}, chars: {char_range})")
+        if len(toc_data['entries']) > 10:
+            print(f"   ... and {len(toc_data['entries']) - 10} more entries")
 
     print(f"\n💡 Next step: uv run python stage3_chunk_content.py --extraction-id {extraction_id}")
 

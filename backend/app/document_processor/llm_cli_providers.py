@@ -760,180 +760,13 @@ class CodexCLIProvider(LLMCLIProvider):
         return "OpenAI Codex"
 
 
-class GLMAPIProvider(LLMCLIProvider):
-    """
-    Provider for ZhipuAI GLM API.
-
-    Uses the ZhipuAI Python SDK to call GLM-4.6 model directly via API.
-    This is an API-based provider, not a CLI tool.
-
-    Features:
-    - Uses GLM-4.6 model (high quality)
-    - 128K token context window
-    - Fast response times
-    - Direct API integration (no CLI needed)
-
-    Configuration:
-    - Requires GLM_API_KEY environment variable
-    - Model: glm-4.6 (can be changed via model parameter)
-    """
-
-    def __init__(self, model: str = None):
-        """
-        Initialize GLM API Provider.
-
-        Args:
-            model: GLM model to use (default: from GLM_MODEL env var, fallback to glm-4.6)
-        """
-        # 如果没有指定模型，从环境变量读取，否则使用默认值
-        if model is None:
-            model = os.environ.get("GLM_MODEL", "glm-4.6")
-        self.model = model
-        self._client = None
-
-    def _get_client(self):
-        """Lazy initialization of ZhipuAI client."""
-        if self._client is None:
-            api_key = os.environ.get("GLM_API_KEY")
-            if not api_key:
-                raise ValueError("GLM_API_KEY environment variable is required")
-
-            try:
-                from zhipuai import ZhipuAI
-                self._client = ZhipuAI(api_key=api_key)
-            except ImportError:
-                raise ImportError("zhipuai package is required. Install with: pip install zhipuai>=2.1.0")
-
-        return self._client
-
-    def is_available(self) -> bool:
-        """Check if GLM API is available (API key exists and package installed)."""
-        try:
-            api_key = os.environ.get("GLM_API_KEY")
-            if not api_key:
-                return False
-
-            from zhipuai import ZhipuAI
-            return True
-        except ImportError:
-            return False
-
-    def build_command(self, prompt: str) -> list[str]:
-        """
-        GLM API doesn't use CLI commands.
-
-        This method is not used for API-based providers.
-        The actual API call is made in parse_output method.
-
-        Args:
-            prompt: The enhancement prompt
-
-        Returns:
-            Empty list (not used for API providers)
-        """
-        return []
-
-    def parse_output(self, stdout: str, stderr: str) -> str:
-        """
-        Call GLM API and parse response.
-
-        For API-based providers, this method handles the actual API call.
-        The stdout parameter contains the prompt to process.
-
-        Args:
-            stdout: The prompt to send to GLM API
-            stderr: Not used for API providers
-
-        Returns:
-            str: Enhanced content from GLM API
-
-        Raises:
-            ValueError: If API call fails or returns invalid response
-        """
-        prompt = stdout.strip()
-
-        if len(prompt) < 10:
-            raise ValueError(f"Prompt too short: {len(prompt)} chars")
-
-        try:
-            client = self._get_client()
-
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,  # Lower temperature for consistent output
-                max_tokens=8192,  # Reasonable output limit
-            )
-
-            enhanced = response.choices[0].message.content.strip()
-
-            if len(enhanced) < 50:
-                raise ValueError(f"GLM API response too short: {len(enhanced)} chars")
-
-            return enhanced
-
-        except Exception as e:
-            raise ValueError(f"GLM API call failed: {str(e)}")
-
-    def get_timeout(self, content_length: int) -> int:
-        """
-        Calculate timeout for GLM API.
-
-        GLM API typically has fast response times.
-        Formula: max(120 seconds, 2 seconds per 1K characters)
-        For skill enhancement: ~2-3 minutes for 40K prompt
-
-        Args:
-            content_length: Length of content to be processed
-
-        Returns:
-            int: Timeout in seconds
-        """
-        MIN_TIMEOUT = 120  # 2 minutes minimum for skill enhancement
-        TIMEOUT_PER_1K_CHARS = 2  # Fast API response
-        return max(MIN_TIMEOUT, content_length // 1000 * TIMEOUT_PER_1K_CHARS)
-
-    def uses_stdin(self) -> bool:
-        """GLM API doesn't use stdin (direct Python calls)."""
-        return False
-
-    def is_api_based(self) -> bool:
-        """GLM provider uses API directly."""
-        return True
-
-    def get_max_chunk_size(self) -> int:
-        """
-        Get maximum chunk size for GLM-4.6.
-
-        Based on GLM-4.6 specifications:
-        - 128K token context window
-        - Chinese chars: ~1-2 tokens per char
-        - English chars: ~4 chars per token
-
-        Using 150K chars (~38K-75K tokens) provides:
-        - Safe buffer for input + output (leaves 53K-90K tokens for response)
-        - Conservative but safe approach
-        - Similar capacity to Claude's 150K chars
-        - Ensures reliable processing without context overflow
-
-        Returns:
-            int: 150,000 characters
-        """
-        return 150_000
-
-    @property
-    def name(self) -> str:
-        return f"GLM API ({self.model})"
-
 
 def get_provider(provider_name: str) -> Optional[LLMCLIProvider]:
     """
     Factory function to get a provider instance by name.
 
     Args:
-        provider_name: Name of the provider ('claude', 'glm-claude', 'gemini', 'gemini-api', 'codex', 'glm-api')
+        provider_name: Name of the provider ('claude', 'glm-claude', 'gemini', 'gemini-api', 'codex')
 
     Returns:
         LLMCLIProvider instance or None if provider not found
@@ -949,7 +782,6 @@ def get_provider(provider_name: str) -> Optional[LLMCLIProvider]:
         'gemini': GeminiCLIProvider,
         'gemini-api': GeminiAPIProvider,
         'codex': CodexCLIProvider,
-        'glm-api': GLMAPIProvider,
     }
 
     provider_class = providers.get(provider_name.lower())
@@ -963,14 +795,14 @@ def detect_available_providers() -> list[str]:
     Detect all available LLM CLI providers on the system.
 
     Returns:
-        list[str]: Names of available providers (e.g., ['claude', 'glm-claude', 'gemini', 'gemini-api', 'glm-api'])
+        list[str]: Names of available providers (e.g., ['claude', 'glm-claude', 'gemini', 'gemini-api', 'codex'])
 
     Example:
         available = detect_available_providers()
         print(f"Available providers: {', '.join(available)}")
     """
     available = []
-    for name in ['claude', 'glm-claude', 'gemini', 'gemini-api', 'codex', 'glm-api']:
+    for name in ['claude', 'glm-claude', 'gemini', 'gemini-api', 'codex']:
         provider = get_provider(name)
         if provider and provider.is_available():
             available.append(name)

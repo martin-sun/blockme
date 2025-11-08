@@ -27,6 +27,7 @@ from app.document_processor.pipeline_manager import PipelineManager, CacheManage
 from app.document_processor.skill_generator import SkillGenerator
 from app.document_processor.content_classifier import ClassificationResult, TaxCategory
 from app.document_processor.glm_claude_processor import GLMClaudeProcessor
+from app.document_processor.dynamic_classifier import DynamicSemanticClassifier
 
 # Configure logging
 logging.basicConfig(
@@ -34,6 +35,69 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def convert_dynamic_to_skill_metadata(dynamic_classification, source_file: str) -> ClassificationResult:
+    """
+    Convert dynamic classification result to existing system's ClassificationResult format.
+
+    Args:
+        dynamic_classification: DynamicClassification result from semantic classifier
+        source_file: Original source file path
+
+    Returns:
+        ClassificationResult compatible with existing skill generation system
+    """
+    # Extract primary category information
+    primary_name = dynamic_classification.primary_category.name
+    primary_type = dynamic_classification.primary_category.category_type
+
+    # Generate skill ID from primary category
+    import re
+    skill_id = f"{primary_type.value.lower()}-{primary_name.lower()}"
+    skill_id = re.sub(r'[^a-z0-9-]', '-', skill_id)
+    skill_id = re.sub(r'-+', '-', skill_id).strip('-')
+    skill_id = skill_id[:50]  # Limit length
+
+    # Map dynamic category types to existing TaxCategory
+    from app.document_processor.content_classifier import TaxCategory
+
+    # Simple mapping - can be enhanced
+    category_mapping = {
+        "domain": TaxCategory.UNKNOWN,
+        "purpose": TaxCategory.UNKNOWN,
+        "topic": TaxCategory.UNKNOWN,
+        "level": TaxCategory.UNKNOWN,
+        "temporal": TaxCategory.UNKNOWN,
+        "geographic": TaxCategory.UNKNOWN,
+        "audience": TaxCategory.UNKNOWN,
+        "format": TaxCategory.UNKNOWN
+    }
+
+    mapped_category = category_mapping.get(primary_type.value, TaxCategory.UNKNOWN)
+
+    # Determine confidence and quality based on primary category
+    confidence = dynamic_classification.primary_category.confidence
+
+    # Create quality metrics
+    quality_metrics = QualityMetrics(
+        relevance_score=confidence,
+        clarity_score=confidence,
+        completeness_score=confidence,
+        accuracy_score=confidence,
+        overall_score=confidence
+    )
+
+    # Create ClassificationResult
+    result = ClassificationResult(
+        primary_category=mapped_category,
+        confidence=confidence,
+        secondary_categories=[],  # Can be mapped more intelligently later
+        quality_metrics=quality_metrics,
+        matched_keywords=list(dynamic_classification.primary_category.keywords)
+    )
+
+    return result
 
 
 def generate_skill_directory(
@@ -137,12 +201,35 @@ def generate_skill_directory(
 
     generator = SkillGenerator(output_dir=output_dir)
 
-    # Generate skill metadata
-    skill = generator.generate_skill(
-        content=total_text,
-        classification=classification,
-        source_file=pdf_path
-    )
+    # Initialize glm_analysis variable
+    glm_analysis = None
+
+    # Check if we have dynamic classification to override the standard skill metadata
+    if glm_analysis and hasattr(glm_analysis, 'primary_category') and hasattr(glm_analysis.primary_category, 'name'):
+        # This is a DynamicClassification result
+        print(f"🧠 Using dynamic semantic classification for skill metadata...")
+
+        # Convert dynamic classification to standard format
+        dynamic_classification = convert_dynamic_to_skill_metadata(glm_analysis, pdf_path)
+
+        # Generate new skill with dynamic classification
+        skill = generator.generate_skill(
+            content=total_text,
+            classification=dynamic_classification,
+            source_file=pdf_path
+        )
+
+        print(f"✅ Dynamic skill metadata generated:")
+        print(f"   Primary: {glm_analysis.primary_category.name}")
+        print(f"   Confidence: {glm_analysis.primary_category.confidence:.2f}")
+        print(f"   Secondary: {[cat.name for cat in glm_analysis.secondary_categories[:3]]}")
+    else:
+        # Generate standard skill metadata
+        skill = generator.generate_skill(
+            content=total_text,
+            classification=classification,
+            source_file=pdf_path
+        )
 
     print(f"✅ Skill metadata generated")
     print(f"   ID: {skill.metadata.id}")
@@ -159,7 +246,7 @@ def generate_skill_directory(
 
     print(f"🔧 Processing {len(enhanced_chunks)} enhanced chunks...")
 
-    # If using GLM-Claude provider, enhance metadata with its analysis capabilities
+    # Use enhanced provider based on selection
     if provider == "glm-claude":
         print(f"🤖 Using GLM-Claude provider for enhanced analysis...")
         try:
@@ -176,6 +263,52 @@ def generate_skill_directory(
 
         except Exception as e:
             print(f"⚠️ GLM-Claude analysis failed: {e}")
+            print(f"   Falling back to standard processing...")
+            glm_analysis = None
+    elif provider == "dynamic-semantic":
+        print(f"🧠 Using Dynamic Semantic Classification provider...")
+        try:
+            from app.document_processor.glm_claude_processor import DocumentChunk, DocumentSplitter
+
+            # Use existing enhanced chunks as TOC entries for dynamic classification
+            toc_entries = []
+            for chunk in enhanced_chunks:
+                toc_entries.append({
+                    'title': chunk.get('original_title', f'Section {chunk.get("chunk_id")}'),
+                    'level': 1,
+                    'page_number': 1,
+                    'char_start': 0,
+                    'char_end': 1000
+                })
+
+            # Create dynamic classifier
+            dynamic_classifier = DynamicSemanticClassifier(provider_name="glm-claude")
+
+            print(f"📊 Performing dynamic semantic classification...")
+            # Since we're in sync context, we'll use a synchronous approach
+            import asyncio
+
+            # Create an event loop for the async call
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                dynamic_classification = loop.run_until_complete(
+                    dynamic_classifier.classify_document(total_text, Path(pdf_path).stem, toc_entries)
+                )
+                print(f"✅ Dynamic classification completed:")
+                print(f"   Primary: {dynamic_classification.primary_category.name}")
+                print(f"   Confidence: {dynamic_classification.primary_category.confidence:.2f}")
+                print(f"   Secondary: {[cat.name for cat in dynamic_classification.secondary_categories[:3]]}")
+                print(f"   Tags: {[tag.tag for tag in dynamic_classification.semantic_tags[:5]]}")
+
+                # Store for later use
+                glm_analysis = dynamic_classification
+            finally:
+                loop.close()
+
+        except Exception as e:
+            print(f"⚠️ Dynamic classification failed: {e}")
             print(f"   Falling back to standard processing...")
             glm_analysis = None
     else:
@@ -202,10 +335,21 @@ def generate_skill_directory(
     reference_chunks = generator._generate_continuous_chapters(reference_chunks)
     print(f"   Ensured continuous numbering: {len(reference_chunks)} chapters")
 
-    # 3. Improve titles using GLM TOC if available
-    if glm_analysis and glm_analysis.toc.entries:
-        print(f"🏷️  Improving chapter titles using GLM TOC...")
-        reference_chunks = generator._improve_chapter_titles_with_toc(reference_chunks, glm_analysis.toc.entries)
+    # 3. Improve titles using TOC if available
+    if glm_analysis:
+        if hasattr(glm_analysis, 'toc') and glm_analysis.toc.entries:
+            # Standard GLM-Claude analysis with TOC
+            print(f"🏷️  Improving chapter titles using GLM TOC...")
+            reference_chunks = generator._improve_chapter_titles_with_toc(reference_chunks, glm_analysis.toc.entries)
+        elif hasattr(glm_analysis, 'semantic_tags'):
+            # Dynamic classification - use semantic information for title improvement
+            print(f"🏷️  Improving chapter titles using dynamic classification insights...")
+            # For now, we'll skip title improvement as the dynamic classifier doesn't generate TOC
+            # In the future, we could use semantic tags to improve titles
+        else:
+            print(f"🏷️  No TOC information available for title improvement")
+    else:
+        print(f"🏷️  No analysis results available for title improvement")
 
     # Sort by chapter_num (final sort)
     reference_chunks.sort(key=lambda x: x['chapter_num'])
@@ -298,7 +442,7 @@ Examples:
         '--provider',
         type=str,
         default='gemini',
-        choices=['gemini', 'glm-claude'],
+        choices=['gemini', 'glm-claude', 'dynamic-semantic'],
         help='LLM provider to use for enhanced processing (default: gemini)'
     )
 

@@ -5,11 +5,8 @@ Stage 2: Content Classification
 Classifies extracted content using semantic analysis with support for multiple providers.
 
 Usage:
-    # Semantic classification with Gemini API (default)
-    uv run python stage2_classify_content.py --extraction-id abc123
-
     # Semantic classification with GLM-4.6 via Claude Code (Chinese optimized)
-    uv run python stage2_classify_content.py --extraction-id abc123 --provider glm-claude
+    uv run python stage2_classify_content.py --extraction-id abc123
 
     # Force re-classification (ignore cache)
     uv run python stage2_classify_content.py --extraction-id abc123 --force
@@ -27,8 +24,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.document_processor.gemini_smart_processor import GeminiSmartProcessor, DocumentAnalysis
-from app.document_processor.glm_claude_processor import GLMClaudeProcessor
+from app.document_processor.glm_claude_processor import GLMClaudeProcessor, DocumentAnalysis
 from app.document_processor.pipeline_manager import CacheManager, PipelineStage
 
 # Configure logging
@@ -43,18 +39,16 @@ def classify_content(
     extraction_id: str,
     force: bool = False,
     cache_dir: Path = None,
-    max_chunk_size: int = 300_000,
-    provider: str = 'gemini-api'
+    max_chunk_size: int = 300_000
 ) -> dict:
     """
-    Classify extracted content using semantic analysis.
+    Classify extracted content using GLM-4.6 semantic analysis.
 
     Args:
         extraction_id: Extraction cache hash ID
         force: Force re-classification even if cached
         cache_dir: Cache directory path
         max_chunk_size: Maximum chunk size for intelligent chunking
-        provider: LLM provider ('gemini-api', 'glm-claude')
 
     Returns:
         Classification data dict
@@ -67,13 +61,7 @@ def classify_content(
     print(f"{'='*60}")
     print(f"Extraction ID: {extraction_id}")
 
-    # Determine method name for display
-    method_names = {
-        'gemini-api': 'Gemini API Semantic Analysis',
-        'glm-claude': 'GLM-4.6 via Claude Code (Chinese Optimized)'
-    }
-    method_name = method_names.get(provider, f'{provider} Analysis')
-    print(f"Method: {method_name}")
+    print(f"Method: GLM-4.6 via Claude Code (Chinese Optimized)")
 
     # Load extraction data
     extraction_data = cache_mgr.load_cache(PipelineStage.EXTRACTION, extraction_id)
@@ -97,17 +85,11 @@ def classify_content(
             print("\n💡 Use --force to re-classify")
             return cached_classification
 
-    # Classify content with selected provider
-    if provider == 'glm-claude':
-        print(f"\n🧠 Analyzing document with GLM-4.6 (Chinese Optimized)...")
-        print(f"   This will take ~{len(total_text) // 1000 * 2 // 60} minutes for {len(total_text):,} chars")
-        print(f"   Using 400K context window with Chinese language optimization...")
-        processor = GLMClaudeProcessor(provider_name=provider)
-    else:
-        print(f"\n🔮 Analyzing document with Gemini...")
-        print(f"   This will take ~{len(total_text) // 1000 * 3 // 60} minutes for {len(total_text):,} chars")
-        print(f"   Using 1.5M context window for holistic analysis...")
-        processor = GeminiSmartProcessor(provider_name=provider)
+    # Classify content with GLM-4.6 (Chinese Optimized)
+    print(f"\n🧠 Analyzing document with GLM-4.6 (Chinese Optimized)...")
+    print(f"   This will take ~{len(total_text) // 1000 * 2 // 60} minutes for {len(total_text):,} chars")
+    print(f"   Using 400K context window with Chinese language optimization...")
+    processor = GLMClaudeProcessor(provider_name='glm-claude')
 
     try:
         pdf_title = extraction_data.get('pdf_path', '').split('/')[-1]
@@ -238,11 +220,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Semantic classification with Gemini API (default)
+  # Semantic classification with GLM-4.6 (Chinese optimized)
   python stage2_classify_content.py --extraction-id abc123
-
-  # Semantic classification with GLM-4.6 via Claude Code (Chinese optimized)
-  python stage2_classify_content.py --extraction-id abc123 --provider glm-claude
 
   # Force re-classification (ignore cache)
   python stage2_classify_content.py --extraction-id abc123 --force
@@ -267,14 +246,7 @@ Examples:
         help='Force re-classification even if cached'
     )
 
-    parser.add_argument(
-        '--provider',
-        type=str,
-        default='gemini-api',
-        choices=['gemini-api', 'glm-claude'],
-        help='LLM provider for semantic classification (gemini-api: Gemini API, glm-claude: GLM-4.6 via Claude Code)'
-    )
-
+    
     parser.add_argument(
         '--max-chunk-size',
         type=int,
@@ -296,8 +268,7 @@ Examples:
             args.extraction_id,
             force=args.force,
             cache_dir=args.cache_dir,
-            max_chunk_size=args.max_chunk_size,
-            provider=args.provider
+            max_chunk_size=args.max_chunk_size
         )
 
         if classification_data is None:

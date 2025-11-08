@@ -222,7 +222,7 @@ def enhance_chunks(
 
     Args:
         chunks_id: Chunks cache hash ID
-        provider_name: LLM provider name (claude/gemini/codex/glm-api/glm-claude)
+        provider_name: LLM provider name (claude/gemini/codex/glm-claude)
         resume: Resume from last completed chunk
         retry_failed: Retry only failed chunks
         force: Force restart from beginning
@@ -543,7 +543,7 @@ Examples:
     parser.add_argument(
         '--provider',
         type=str,
-        choices=['claude', 'gemini', 'codex', 'glm-api', 'glm-claude'],
+        choices=['claude', 'gemini', 'codex', 'glm-claude'],
         help='LLM provider to use (required unless --resume)'
     )
 

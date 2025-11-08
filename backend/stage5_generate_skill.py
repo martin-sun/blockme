@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from app.document_processor.pipeline_manager import PipelineManager, CacheManager, PipelineStage
 from app.document_processor.skill_generator import SkillGenerator
 from app.document_processor.content_classifier import ClassificationResult, TaxCategory
+from app.document_processor.glm_claude_processor import GLMClaudeProcessor
 
 # Configure logging
 logging.basicConfig(
@@ -39,7 +40,8 @@ def generate_skill_directory(
     enhanced_id: str,
     output_dir: str = "skills_output",
     force: bool = False,
-    cache_dir: Path = None
+    cache_dir: Path = None,
+    provider: str = "gemini"
 ) -> Path:
     """
     Generate skill directory from cached enhanced chunks.
@@ -49,6 +51,7 @@ def generate_skill_directory(
         output_dir: Output directory for skills
         force: Force overwrite if skill exists
         cache_dir: Cache directory path
+        provider: LLM provider to use (gemini, glm-claude)
 
     Returns:
         Path to generated skill directory
@@ -154,6 +157,30 @@ def generate_skill_directory(
         print(f"   Use --force to overwrite")
         return None
 
+    print(f"🔧 Processing {len(enhanced_chunks)} enhanced chunks...")
+
+    # If using GLM-Claude provider, enhance metadata with its analysis capabilities
+    if provider == "glm-claude":
+        print(f"🤖 Using GLM-Claude provider for enhanced analysis...")
+        try:
+            glm_processor = GLMClaudeProcessor(provider_name="glm-claude")
+
+            # Analyze the full document to get better metadata
+            print(f"📊 Performing GLM analysis for skill generation...")
+            glm_analysis = glm_processor.analyze_full_document(total_text, Path(pdf_path).stem)
+
+            print(f"✅ GLM analysis completed:")
+            print(f"   Category: {glm_analysis.classification.primary_category.value}")
+            print(f"   Confidence: {glm_analysis.classification.confidence:.2f}")
+            print(f"   TOC entries: {glm_analysis.toc.total_entries}")
+
+        except Exception as e:
+            print(f"⚠️ GLM-Claude analysis failed: {e}")
+            print(f"   Falling back to standard processing...")
+            glm_analysis = None
+    else:
+        glm_analysis = None
+
     # Prepare reference chunks for save_skill_directory
     reference_chunks = []
     for enhanced_chunk in enhanced_chunks:
@@ -164,7 +191,23 @@ def generate_skill_directory(
             'chapter_num': enhanced_chunk.get('chunk_id', 0)
         })
 
-    # Sort by chapter_num
+    # Apply optimizations
+    print(f"🧹 Applying optimizations...")
+
+    # 1. Remove duplicate content
+    reference_chunks = generator._deduplicate_content_chunks(reference_chunks)
+    print(f"   Removed duplicates: {len(enhanced_chunks) - len(reference_chunks)} chunks")
+
+    # 2. Ensure continuous chapter numbering
+    reference_chunks = generator._generate_continuous_chapters(reference_chunks)
+    print(f"   Ensured continuous numbering: {len(reference_chunks)} chapters")
+
+    # 3. Improve titles using GLM TOC if available
+    if glm_analysis and glm_analysis.toc.entries:
+        print(f"🏷️  Improving chapter titles using GLM TOC...")
+        reference_chunks = generator._improve_chapter_titles_with_toc(reference_chunks, glm_analysis.toc.entries)
+
+    # Sort by chapter_num (final sort)
     reference_chunks.sort(key=lambda x: x['chapter_num'])
 
     # Save skill directory
@@ -251,6 +294,14 @@ Examples:
         help='Cache directory (default: backend/cache/)'
     )
 
+    parser.add_argument(
+        '--provider',
+        type=str,
+        default='gemini',
+        choices=['gemini', 'glm-claude'],
+        help='LLM provider to use for enhanced processing (default: gemini)'
+    )
+
     args = parser.parse_args()
 
     # Generate skill directory
@@ -259,7 +310,8 @@ Examples:
             args.enhanced_id,
             output_dir=args.output_dir,
             force=args.force,
-            cache_dir=args.cache_dir
+            cache_dir=args.cache_dir,
+            provider=args.provider
         )
 
         if skill_dir is None:

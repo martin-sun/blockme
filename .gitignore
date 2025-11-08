@@ -55,3 +55,5 @@ tmp/
 temp/
 *.tmp
 skills_output/
+
+test_result/

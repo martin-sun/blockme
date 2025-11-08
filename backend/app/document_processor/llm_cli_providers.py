@@ -208,6 +208,129 @@ class ClaudeCLIProvider(LLMCLIProvider):
         return "Claude Code"
 
 
+class GLMClaudeCodeProvider(LLMCLIProvider):
+    """
+    Provider for GLM model through Claude Code CLI.
+
+    Uses the ccc glm command to launch Claude Code with GLM-4.6 model.
+    This provides local processing with Chinese language advantages.
+    Command: ccc glm --print --tools ''
+
+    Features:
+    - Local GLM-4.6 model processing
+    - Chinese language optimization
+    - Large context window support
+    - No API dependencies or costs
+    """
+
+    def is_available(self) -> bool:
+        """Check if ccc command is available (shell function or executable)."""
+        import subprocess
+        import os
+
+        # Check if claude CLI is available (required)
+        claude_available = shutil.which('claude') is not None
+        if not claude_available:
+            return False
+
+        # Check if ccm script is available
+        ccm_script = os.path.expanduser("~/.local/share/ccm/ccm.sh")
+        if not os.path.isfile(ccm_script):
+            return False
+
+        # Try to run ccm to see if it works
+        try:
+            result = subprocess.run(
+                ['bash', ccm_script, 'status'],
+                capture_output=True,
+                timeout=10
+            )
+            # If we can run ccm, we assume ccc functionality is available
+            return True
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return False
+
+    def build_command(self, prompt: str) -> list[str]:
+        """
+        Build command for GLM through Claude Code.
+
+        Since ccc is a shell function, we need to simulate its functionality:
+        1. Use ccm to switch to GLM-4.6 model (set environment variables)
+        2. Launch claude CLI with GLM backend
+        3. Process in non-interactive mode
+
+        This builds a bash command that:
+        - Evaluates ccm glm output to set environment variables
+        - Runs claude CLI with appropriate flags
+        """
+        import os
+
+        # Build a bash command that evaluates GLM environment setup and runs claude
+        bash_command = 'eval "$(ccm glm 2>/dev/null)" && claude --print --tools ""'
+
+        return ['bash', '-c', bash_command]
+
+    def parse_output(self, stdout: str, stderr: str) -> str:
+        """
+        Parse GLM Claude Code output.
+
+        Similar to Claude CLI but handles GLM-specific output patterns.
+        Validates that output is substantial and error-free.
+        """
+        enhanced = stdout.strip()
+
+        if len(enhanced) < 50:
+            raise ValueError(f"GLM output too short: {len(enhanced)} chars")
+
+        if enhanced.startswith("Error") or enhanced.startswith("❌"):
+            raise ValueError(f"GLM CLI returned error: {enhanced[:100]}")
+
+        return enhanced
+
+    def get_timeout(self, content_length: int) -> int:
+        """
+        Calculate timeout for GLM Claude Code.
+
+        GLM-4.6 typically processes faster than Claude Sonnet for Chinese content.
+        Formula: max(180 seconds, 4 seconds per 1K characters)
+        Typical: 3-6 minutes for 300K chunk
+        """
+        MIN_TIMEOUT = 180  # 3 minutes minimum for GLM
+        TIMEOUT_PER_1K_CHARS = 4  # GLM processes Chinese content faster
+        return max(MIN_TIMEOUT, content_length // 1000 * TIMEOUT_PER_1K_CHARS)
+
+    def uses_stdin(self) -> bool:
+        """GLM through Claude Code accepts prompts via stdin."""
+        return True
+
+    def is_api_based(self) -> bool:
+        """GLM Claude Code is command-line based."""
+        return False
+
+    def get_max_chunk_size(self) -> int:
+        """
+        Get maximum chunk size for GLM-4.6.
+
+        Based on GLM-4.6 specifications:
+        - 128K token context window
+        - ~4 chars per token ratio
+        - Optimized for Chinese content processing
+
+        Using 400K chars (~100K tokens) provides good balance:
+        - Leverages GLM's large context advantage
+        - Leaves room for response generation
+        - Optimized for Chinese document processing
+
+        Returns:
+            int: 400,000 characters
+        """
+        return 400_000
+
+    @property
+    def name(self) -> str:
+        return "GLM via Claude Code"
+
+
 class GeminiCLIProvider(LLMCLIProvider):
     """
     Provider for Google Gemini CLI.
@@ -655,13 +778,16 @@ class GLMAPIProvider(LLMCLIProvider):
     - Model: glm-4.6 (can be changed via model parameter)
     """
 
-    def __init__(self, model: str = "glm-4.6"):
+    def __init__(self, model: str = None):
         """
         Initialize GLM API Provider.
 
         Args:
-            model: GLM model to use (default: glm-4.6)
+            model: GLM model to use (default: from GLM_MODEL env var, fallback to glm-4.6)
         """
+        # 如果没有指定模型，从环境变量读取，否则使用默认值
+        if model is None:
+            model = os.environ.get("GLM_MODEL", "glm-4.6")
         self.model = model
         self._client = None
 
@@ -807,18 +933,19 @@ def get_provider(provider_name: str) -> Optional[LLMCLIProvider]:
     Factory function to get a provider instance by name.
 
     Args:
-        provider_name: Name of the provider ('claude', 'gemini', 'gemini-api', 'codex', 'glm-api')
+        provider_name: Name of the provider ('claude', 'glm-claude', 'gemini', 'gemini-api', 'codex', 'glm-api')
 
     Returns:
         LLMCLIProvider instance or None if provider not found
 
     Example:
-        provider = get_provider('gemini')
+        provider = get_provider('glm-claude')
         if provider and provider.is_available():
-            # Use provider...
+            # Use GLM through Claude Code...
     """
     providers = {
         'claude': ClaudeCLIProvider,
+        'glm-claude': GLMClaudeCodeProvider,
         'gemini': GeminiCLIProvider,
         'gemini-api': GeminiAPIProvider,
         'codex': CodexCLIProvider,
@@ -836,14 +963,14 @@ def detect_available_providers() -> list[str]:
     Detect all available LLM CLI providers on the system.
 
     Returns:
-        list[str]: Names of available providers (e.g., ['claude', 'gemini', 'gemini-api', 'glm-api'])
+        list[str]: Names of available providers (e.g., ['claude', 'glm-claude', 'gemini', 'gemini-api', 'glm-api'])
 
     Example:
         available = detect_available_providers()
         print(f"Available providers: {', '.join(available)}")
     """
     available = []
-    for name in ['claude', 'gemini', 'gemini-api', 'codex', 'glm-api']:
+    for name in ['claude', 'glm-claude', 'gemini', 'gemini-api', 'codex', 'glm-api']:
         provider = get_provider(name)
         if provider and provider.is_available():
             available.append(name)

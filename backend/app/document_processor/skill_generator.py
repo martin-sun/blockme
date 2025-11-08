@@ -4,6 +4,7 @@ Skill Generator - Convert processed documents to Skill files
 Generates Markdown files with YAML front matter compatible with MVP skill_loader.py
 """
 
+import hashlib
 import logging
 import re
 import time
@@ -420,6 +421,71 @@ This skill contains {len(reference_files)} reference chapters:
 
         logger.info(f"SKILL.md index created: {skill_path}")
 
+    def _deduplicate_content_chunks(self, reference_chunks):
+        """Remove duplicate or similar content chunks."""
+        seen_hashes = set()
+        unique_chunks = []
+
+        for chunk in reference_chunks:
+            content_hash = hashlib.md5(chunk['content'].encode()).hexdigest()
+
+            if content_hash not in seen_hashes:
+                seen_hashes.add(content_hash)
+                unique_chunks.append(chunk)
+            else:
+                logger.warning(f"Duplicate content detected: {chunk['title']}")
+
+        return unique_chunks
+
+    def _generate_continuous_chapters(self, reference_chunks):
+        """Generate continuous chapter numbering."""
+        # Sort by original chunk_id to maintain document order
+        sorted_chunks = sorted(reference_chunks, key=lambda x: x['chapter_num'])
+        continuous_chunks = []
+
+        for i, chunk in enumerate(sorted_chunks, 1):
+            # Reset chapter number to ensure continuity
+            chunk['chapter_num'] = i
+            continuous_chunks.append(chunk)
+
+        return continuous_chunks
+
+    def _improve_chapter_titles_with_toc(self, reference_chunks, toc_entries):
+        """Improve chapter titles using TOC information."""
+
+        # Sort TOC entries by character position
+        sorted_toc = sorted([entry for entry in toc_entries if entry.char_start is not None],
+                          key=lambda x: x.char_start)
+
+        improved_chunks = []
+
+        for chunk in reference_chunks:
+            improved_title = chunk['title']
+
+            # Find the best TOC entry for this chunk
+            if sorted_toc:
+                # Use simple heuristic: find TOC entry that might correspond to this chapter
+                chapter_num = chunk['chapter_num']
+
+                # Try to match by chapter number or position
+                if chapter_num <= len(sorted_toc):
+                    # Use chapter number as index (adjusted for 0-based)
+                    toc_entry = sorted_toc[min(chapter_num - 1, len(sorted_toc) - 1)]
+                    improved_title = f"{toc_entry.title}"
+
+                # Fallback: look for matching "Section X" pattern
+                if improved_title.startswith("Section"):
+                    for toc_entry in sorted_toc:
+                        if f"Section {chapter_num}" in improved_title or chapter_num == 1:
+                            improved_title = toc_entry.title
+                            break
+
+            # If no improvement found, keep original
+            chunk['title'] = improved_title
+            improved_chunks.append(chunk)
+
+        return improved_chunks
+
     def _generate_use_cases(self, metadata: SkillMetadata) -> str:
         """Generate use cases based on category and tags."""
         use_cases = []
@@ -512,14 +578,22 @@ This skill contains {len(reference_files)} reference chapters:
         return category_titles.get(category, "CRA Tax Information")
 
     def _generate_description(self, content: str) -> str:
-        """Generate short description from first paragraph."""
+        """Generate short description from first paragraph, skipping page markers."""
+        # Remove page markers first
+        clean_content = re.sub(r'=== Page \d+ ===\n', '', content)
+
         # Remove markdown headings
-        clean_content = re.sub(r'^#+\s+.+$', '', content, flags=re.MULTILINE)
+        clean_content = re.sub(r'^#+\s+.+$', '', clean_content, flags=re.MULTILINE)
         clean_content = clean_content.strip()
 
-        # Extract first paragraph
+        # Extract first meaningful paragraph
         paragraphs = clean_content.split('\n\n')
-        first_paragraph = paragraphs[0] if paragraphs else ""
+        first_paragraph = ""
+
+        for para in paragraphs:
+            if para.strip() and not para.strip().startswith('==='):
+                first_paragraph = para.strip()
+                break
 
         # Clean formatting
         first_paragraph = re.sub(r'\*\*(.+?)\*\*', r'\1', first_paragraph)

@@ -49,12 +49,200 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def validate_progress_file(progress: Dict, expected_total_chunks: int, chunks_id: str) -> bool:
+    """
+    Validate progress file integrity and consistency.
+
+    Args:
+        progress: Progress dictionary to validate
+        expected_total_chunks: Expected total number of chunks
+        chunks_id: Chunks ID for logging
+
+    Returns:
+        True if progress file is valid, False otherwise
+    """
+    logger.info(f"Starting progress file validation for {chunks_id}")
+    logger.debug(f"Progress file content: {progress}")
+
+    # Check required fields
+    required_fields = ["total_chunks", "completed_chunks", "failed_chunks", "provider"]
+    for field in required_fields:
+        if field not in progress:
+            logger.error(f"Progress file missing required field: {field}")
+            return False
+        else:
+            logger.debug(f"  - {field}: {progress[field]}")
+
+    # Validate total_chunks
+    if progress["total_chunks"] != expected_total_chunks:
+        logger.warning(
+            f"Progress file total_chunks ({progress['total_chunks']}) "
+            f"doesn't match expected ({expected_total_chunks})"
+        )
+        # Update total_chunks to match expected
+        progress["total_chunks"] = expected_total_chunks
+        logger.info(f"Updated total_chunks to {expected_total_chunks}")
+    else:
+        logger.debug(f"Total chunks validation passed: {expected_total_chunks}")
+
+    # Validate completed_chunks
+    completed = progress.get("completed_chunks", 0)
+    if not isinstance(completed, int) or completed < 0:
+        logger.error(f"Invalid completed_chunks value: {completed}")
+        return False
+
+    if completed > expected_total_chunks:
+        logger.warning(
+            f"completed_chunks ({completed}) exceeds total_chunks ({expected_total_chunks})"
+        )
+        progress["completed_chunks"] = min(completed, expected_total_chunks)
+        logger.info(f"Adjusted completed_chunks to {progress['completed_chunks']}")
+
+    logger.debug(f"Completed chunks validation passed: {completed}")
+
+    # Validate failed_chunks
+    failed_chunks = progress.get("failed_chunks", [])
+    if not isinstance(failed_chunks, list):
+        logger.error(f"Invalid failed_chunks type: {type(failed_chunks)}")
+        return False
+
+    logger.debug(f"Failed chunks before validation: {failed_chunks}")
+
+    # Check for invalid chunk numbers in failed_chunks
+    valid_failed_chunks = [c for c in failed_chunks if 1 <= c <= expected_total_chunks]
+    if len(valid_failed_chunks) != len(failed_chunks):
+        invalid_count = len(failed_chunks) - len(valid_failed_chunks)
+        logger.warning(f"Removed {invalid_count} invalid failed chunk numbers")
+        progress["failed_chunks"] = valid_failed_chunks
+        logger.debug(f"Invalid chunks removed: {[c for c in failed_chunks if c not in valid_failed_chunks]}")
+
+    # Check for duplicate chunks in failed_chunks
+    if len(set(failed_chunks)) != len(failed_chunks):
+        duplicates = len(failed_chunks) - len(set(failed_chunks))
+        logger.warning(f"Removed {duplicates} duplicate entries from failed_chunks")
+        progress["failed_chunks"] = list(set(failed_chunks))
+
+    # Validate completed_chunks doesn't overlap with failed_chunks
+    if completed in failed_chunks:
+        logger.warning(f"Chunk {completed} marked as both completed and failed, removing from failed")
+        progress["failed_chunks"].remove(completed)
+
+    logger.debug(f"Failed chunks after validation: {progress['failed_chunks']}")
+    logger.info("Progress file validation completed successfully")
+    return True
+
+
+def check_cache_consistency(chunks_id: str, total_chunks: int, cache_dir: Path) -> Dict:
+    """
+    Check consistency between chunks cache and enhanced chunks cache.
+
+    Args:
+        chunks_id: Chunks ID to check
+        total_chunks: Expected total number of chunks
+        cache_dir: Cache directory path
+
+    Returns:
+        Dictionary with consistency check results
+    """
+    logger.info(f"Starting cache consistency check for {chunks_id}")
+
+    pipeline = PipelineManager(cache_dir)
+
+    # Check chunks cache
+    chunks_cache_path = pipeline.cache_manager.get_cache_path(PipelineStage.CHUNKING, chunks_id)
+    enhanced_cache_path = pipeline.cache_manager.get_cache_path(PipelineStage.ENHANCEMENT, chunks_id)
+
+    results = {
+        "chunks_cache_exists": False,
+        "enhanced_cache_exists": False,
+        "missing_chunks": [],
+        "orphaned_chunks": [],
+        "consistency_issues": [],
+        "total_chunks_in_cache": 0,
+        "enhanced_chunks_count": 0
+    }
+
+    # Check chunks cache
+    if chunks_cache_path.exists():
+        results["chunks_cache_exists"] = True
+        chunks_data = pipeline.cache_manager.load_cache(PipelineStage.CHUNKING, chunks_id)
+        if chunks_data and "chunks" in chunks_data:
+            chunks_list = chunks_data["chunks"]
+            results["total_chunks_in_cache"] = len(chunks_list)
+
+            logger.debug(f"Chunks cache contains {results['total_chunks_in_cache']} chunks")
+
+            if results["total_chunks_in_cache"] != total_chunks:
+                results["consistency_issues"].append(
+                    f"Chunks cache has {results['total_chunks_in_cache']} chunks, expected {total_chunks}"
+                )
+    else:
+        results["consistency_issues"].append("Chunks cache file not found")
+        logger.warning("Chunks cache file not found")
+
+    # Check enhanced chunks cache
+    if enhanced_cache_path.exists():
+        results["enhanced_cache_exists"] = True
+
+        # Count enhanced chunk files
+        enhanced_files = list(enhanced_cache_path.glob("chunk-*.json"))
+        results["enhanced_chunks_count"] = len(enhanced_files)
+
+        logger.debug(f"Enhanced chunks cache contains {results['enhanced_chunks_count']} chunk files")
+
+        # Parse chunk numbers from filenames
+        enhanced_chunk_numbers = []
+        for file_path in enhanced_files:
+            try:
+                # Extract chunk number from filename like "chunk-001.json"
+                chunk_num = int(file_path.stem.split('-')[1])
+                enhanced_chunk_numbers.append(chunk_num)
+            except (ValueError, IndexError):
+                results["consistency_issues"].append(f"Invalid chunk filename: {file_path.name}")
+
+        enhanced_chunk_numbers.sort()
+
+        # Check for missing chunks (1 to total_chunks)
+        for chunk_num in range(1, total_chunks + 1):
+            if chunk_num not in enhanced_chunk_numbers:
+                results["missing_chunks"].append(chunk_num)
+
+        # Check for orphaned chunks (chunk numbers beyond expected range)
+        for chunk_num in enhanced_chunk_numbers:
+            if chunk_num < 1 or chunk_num > total_chunks:
+                results["orphaned_chunks"].append(chunk_num)
+
+        # Log consistency issues
+        if results["missing_chunks"]:
+            logger.warning(f"Missing enhanced chunks: {results['missing_chunks']}")
+            results["consistency_issues"].append(f"Missing {len(results['missing_chunks'])} enhanced chunks")
+
+        if results["orphaned_chunks"]:
+            logger.warning(f"Orphaned enhanced chunks: {results['orphaned_chunks']}")
+            results["consistency_issues"].append(f"Found {len(results['orphaned_chunks'])} orphaned chunks")
+
+    else:
+        logger.debug("Enhanced chunks cache does not exist yet")
+
+    # Summary
+    if not results["consistency_issues"]:
+        logger.info("Cache consistency check passed - no issues found")
+    else:
+        logger.warning(f"Cache consistency check found {len(results['consistency_issues'])} issues")
+        for issue in results["consistency_issues"]:
+            logger.warning(f"  - {issue}")
+
+    logger.info(f"Cache consistency check completed: {results['enhanced_chunks_count']}/{total_chunks} chunks enhanced")
+    return results
+
+
 def enhance_single_chunk(
     chunk_content: str,
     category: str,
     chunk_num: int,
     total_chunks: int,
-    provider
+    provider,
+    max_retries: int = 2
 ) -> str:
     """
     Enhance a single chunk using LLM CLI provider.
@@ -65,13 +253,17 @@ def enhance_single_chunk(
         chunk_num: Current chunk number
         total_chunks: Total number of chunks
         provider: LLM CLI provider instance
+        max_retries: Maximum number of retry attempts
 
     Returns:
         Enhanced content
+
+    Raises:
+        Exception: If all retry attempts fail
     """
     chunk_info = f" (chunk {chunk_num}/{total_chunks})" if total_chunks > 1 else ""
 
-    prompt = f"""Please optimize this CRA tax content for the '{category}' category{chunk_info}.
+    prompt = f"""Please enhance this CRA tax content for the '{category}' category{chunk_info}.
 
 Requirements:
 1. Keep all factual information accurate and complete
@@ -80,6 +272,9 @@ Requirements:
 4. Use professional Canadian tax terminology
 5. Format as clean Markdown with proper headers (##, ###)
 6. Make it actionable for developers building tax applications
+7. IMPORTANT: Maintain at least 70% of the original content length
+8. Preserve detailed explanations and legal nuances
+9. Do not over-summarize complex tax provisions
 
 IMPORTANT: Output ONLY the enhanced Markdown content, nothing else. No meta-commentary.
 
@@ -88,50 +283,75 @@ Content to enhance:
 
 Enhanced content (Markdown only):"""
 
-    try:
-        # Get timeout
-        timeout = provider.get_timeout(len(chunk_content))
+    last_error = None
 
-        # Check if provider is API-based
-        if hasattr(provider, 'is_api_based') and provider.is_api_based():
-            # API-based provider: call parse_output directly with prompt
-            # For API providers, parse_output expects the prompt as stdout parameter
-            enhanced = provider.parse_output(prompt, "")
-            return enhanced
-        else:
-            # CLI-based provider: use subprocess
-            command = provider.build_command(prompt)
+    for attempt in range(max_retries + 1):
+        try:
+            if attempt > 0:
+                logger.info(f"Retry attempt {attempt}/{max_retries} for chunk {chunk_num}")
+                # Add small delay between retries
+                time.sleep(2 ** attempt)  # Exponential backoff
 
-            # Execute
-            if provider.uses_stdin():
-                result = subprocess.run(
-                    command,
-                    input=prompt,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout
-                )
-            else:
-                result = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout
-                )
+            # Get timeout
+            timeout = provider.get_timeout(len(chunk_content))
 
-            if result.returncode == 0:
-                enhanced = provider.parse_output(result.stdout, result.stderr)
+            # Check if provider is API-based
+            if hasattr(provider, 'is_api_based') and provider.is_api_based():
+                # API-based provider: call parse_output directly with prompt
+                # For API providers, parse_output expects the prompt as stdout parameter
+                enhanced = provider.parse_output(prompt, "")
                 return enhanced
             else:
-                logger.error(f"Enhancement failed for chunk {chunk_num}: code {result.returncode}")
-                raise Exception(f"Provider returned error code {result.returncode}")
+                # CLI-based provider: use subprocess
+                command = provider.build_command(prompt)
 
-    except subprocess.TimeoutExpired:
-        logger.error(f"Enhancement timed out for chunk {chunk_num}")
-        raise
-    except Exception as e:
-        logger.error(f"Enhancement failed for chunk {chunk_num}: {e}")
-        raise
+                # Get provider-specific environment variables (e.g., GLM configuration)
+                provider_env = provider.get_env()
+
+                # Execute
+                if provider.uses_stdin():
+                    result = subprocess.run(
+                        command,
+                        input=prompt,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        env=provider_env
+                    )
+                else:
+                    result = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        env=provider_env
+                    )
+
+                if result.returncode == 0:
+                    enhanced = provider.parse_output(result.stdout, result.stderr)
+                    if enhanced.strip():  # Check if result is not empty
+                        return enhanced
+                    else:
+                        raise Exception("Provider returned empty content")
+                else:
+                    error_msg = f"Provider returned error code {result.returncode}"
+                    if result.stderr:
+                        error_msg += f": {result.stderr.strip()}"
+                    raise Exception(error_msg)
+
+        except subprocess.TimeoutExpired:
+            last_error = f"Enhancement timed out for chunk {chunk_num} (attempt {attempt + 1})"
+            logger.error(last_error)
+            if attempt == max_retries:
+                break
+        except Exception as e:
+            last_error = f"Enhancement failed for chunk {chunk_num} (attempt {attempt + 1}): {str(e)}"
+            logger.error(last_error)
+            if attempt == max_retries:
+                break
+
+    # All retries failed
+    raise Exception(f"All retry attempts failed for chunk {chunk_num}. Last error: {last_error}")
 
 
 def process_chunk_worker(
@@ -157,14 +377,25 @@ def process_chunk_worker(
 
     Returns:
         Tuple of (chunk_num, success, message, processing_time)
+
+    Raises:
+        Exception: If chunk processing fails (fast-fail behavior)
     """
     start_time = time.time()
 
     try:
+        logger.debug(f"Starting processing for chunk {chunk_num}")
+        logger.debug(f"  - Provider: {provider_name}")
+        logger.debug(f"  - Category: {category}")
+        logger.debug(f"  - Content length: {chunk_data.get('char_count', 'unknown')}")
+
         # Initialize provider in this subprocess
         provider = get_provider(provider_name)
+
         if not provider:
-            return (chunk_num, False, f"Provider '{provider_name}' not available", 0.0)
+            raise Exception(f"Provider '{provider_name}' not available")
+
+        logger.debug(f"Provider '{provider_name}' initialized successfully")
 
         # Enhance the chunk
         enhanced_content = enhance_single_chunk(
@@ -175,7 +406,27 @@ def process_chunk_worker(
             provider
         )
 
+        logger.debug(f"Enhancement completed for chunk {chunk_num}")
+
+        # Validate enhanced content length
+        original_char_count = chunk_data.get('char_count', 0)
+        enhanced_char_count = len(enhanced_content)
+        length_ratio = enhanced_char_count / original_char_count if original_char_count > 0 else 0
+
+        logger.debug(f"Content length validation for chunk {chunk_num}:")
+        logger.debug(f"  - Original: {original_char_count} chars")
+        logger.debug(f"  - Enhanced: {enhanced_char_count} chars")
+        logger.debug(f"  - Ratio: {length_ratio:.2f}")
+
+        if length_ratio < 0.6:
+            logger.warning(
+                f"Chunk {chunk_num}: Enhanced content significantly shorter "
+                f"({enhanced_char_count} vs {original_char_count} chars, ratio: {length_ratio:.2f})"
+            )
+            # Note: We still save the result but log the warning for monitoring
+
         # Save enhanced chunk immediately
+        logger.debug(f"Saving enhanced chunk {chunk_num} to cache")
         pipeline = PipelineManager(cache_dir)
         output_dir = pipeline.cache_manager.get_cache_path(
             PipelineStage.ENHANCEMENT,
@@ -198,14 +449,39 @@ def process_chunk_worker(
         with open(chunk_file, 'w', encoding='utf-8') as f:
             json.dump(chunk_output, f, ensure_ascii=False, indent=2)
 
+        logger.debug(f"Successfully saved chunk {chunk_num} to {chunk_file}")
+        logger.debug(f"Chunk {chunk_num} output summary:")
+        logger.debug(f"  - Title: {chunk_data.get('title', 'No title')}")
+        logger.debug(f"  - Provider: {provider_name}")
+        logger.debug(f"  - File size: {chunk_file.stat().st_size} bytes")
+
         processing_time = time.time() - start_time
+        logger.debug(f"Chunk {chunk_num} processing completed in {processing_time:.1f}s")
         return (chunk_num, True, f"Success ({processing_time:.1f}s)", processing_time)
 
     except Exception as e:
         processing_time = time.time() - start_time
         error_msg = f"Failed: {str(e)}"
-        logger.error(f"Chunk {chunk_num} failed: {e}")
-        return (chunk_num, False, error_msg, processing_time)
+
+        # Enhanced error logging
+        logger.error(f"Chunk {chunk_num} processing failed after {processing_time:.1f}s: {e}")
+        logger.error(f"  - Provider: {provider_name}")
+        logger.error(f"  - Category: {category}")
+        logger.error(f"  - Original content length: {chunk_data.get('char_count', 'unknown')}")
+
+        # Provide helpful error messages for common issues
+        error_str = str(e).lower()
+        if "timeout" in error_str:
+            logger.error(f"  - Suggestion: Consider increasing timeout or reducing chunk size")
+            raise Exception(f"Chunk {chunk_num} processing timed out after {processing_time:.1f}s")
+        elif "provider" in error_str and "not available" in error_str:
+            logger.error(f"  - Suggestion: Check if {provider_name} CLI tool is properly installed and accessible")
+            raise Exception(f"Provider '{provider_name}' not available for chunk {chunk_num}")
+        elif "return code" in error_str:
+            logger.error(f"  - Suggestion: Provider CLI tool failed, check system resources and tool configuration")
+            raise Exception(f"Provider CLI tool failed for chunk {chunk_num}: {str(e)}")
+        else:
+            raise Exception(f"Chunk {chunk_num} processing failed: {str(e)}")
 
 
 def enhance_chunks(
@@ -259,28 +535,47 @@ def enhance_chunks(
     category = classification_data.get("primary_category", "unknown")
     print(f"Category: {category}")
 
+    # Perform cache consistency check
+    consistency_results = check_cache_consistency(chunks_id, total_chunks, cache_dir or Path('cache'))
+
+    # Log consistency results at info level if there are issues
+    if consistency_results["consistency_issues"]:
+        print(f"\n⚠️  Cache consistency issues detected:")
+        for issue in consistency_results["consistency_issues"]:
+            print(f"   - {issue}")
+
     # Check existing progress
     progress = pipeline.get_enhancement_progress(chunks_id)
 
     if force and progress:
         print(f"\n⚠️  Force mode: Ignoring existing progress")
         progress = None
-    elif progress and not resume and not retry_failed:
-        completed = progress.get("completed_chunks", 0)
-        failed_count = len(progress.get("failed_chunks", []))
-
-        # Check if all chunks are already completed
-        if completed == total_chunks and failed_count == 0:
-            print(f"\n✅ All chunks already enhanced ({completed}/{total_chunks})")
-            print(f"   Skipping enhancement stage")
-            return True  # Success - all work is done
-        else:
-            # Incomplete progress - require explicit resume
-            print(f"\n⚠️  Found incomplete progress:")
-            print(f"   Completed: {completed}/{total_chunks}")
-            print(f"   Failed: {failed_count}")
-            print(f"   Use --resume to continue or --force to restart")
+    elif progress:
+        # Validate progress file integrity
+        if not validate_progress_file(progress, total_chunks, chunks_id):
+            print(f"\n❌ Error: Progress file validation failed")
+            print(f"   Use --force to restart or --resume to attempt recovery")
             return False
+
+        # Save corrected progress if validation made changes
+        pipeline.save_enhancement_progress(chunks_id, progress)
+
+        if not resume and not retry_failed:
+            completed = progress.get("completed_chunks", 0)
+            failed_count = len(progress.get("failed_chunks", []))
+
+            # Check if all chunks are already completed
+            if completed == total_chunks and failed_count == 0:
+                print(f"\n✅ All chunks already enhanced ({completed}/{total_chunks})")
+                print(f"   Skipping enhancement stage")
+                return True  # Success - all work is done
+            else:
+                # Incomplete progress - require explicit resume
+                print(f"\n⚠️  Found incomplete progress:")
+                print(f"   Completed: {completed}/{total_chunks}")
+                print(f"   Failed: {failed_count}")
+                print(f"   Use --resume to continue or --force to restart")
+                return False
 
     # Determine provider
     if provider_name:
@@ -333,6 +628,18 @@ def enhance_chunks(
     est_total = len(chunks_to_process) * est_time_per_chunk / workers
     print(f"Estimated time: {int(est_total)} minutes ({len(chunks_to_process)} chunks ÷ {workers} workers)")
     print(f"\n{'='*60}")
+
+    # Initialize provider for performance monitoring
+    print(f"\nInitializing provider: {provider_name}")
+    provider_init_start = time.time()
+
+    provider = get_provider(provider_name)
+
+    if not provider:
+        raise Exception(f"Provider '{provider_name}' not available")
+
+    provider_init_time = time.time() - provider_init_start
+    print(f"Provider initialized in {provider_init_time:.2f}s")
 
     # Process chunks
     start_time = time.time()
@@ -394,7 +701,7 @@ def enhance_chunks(
                         result_chunk_num, success, message, proc_time = future.result()
                         completed_count += 1
 
-                        # Update progress
+                        # Update progress - fast-fail mode: no failure handling expected
                         if success:
                             successful += 1
                             # Remove from failed list if present
@@ -406,9 +713,12 @@ def enhance_chunks(
                                 result_chunk_num
                             )
                         else:
-                            failed += 1
-                            if result_chunk_num not in progress.get("failed_chunks", []):
-                                progress["failed_chunks"].append(result_chunk_num)
+                            # This should not happen in fast-fail mode, but handle it gracefully
+                            error_msg = f"Chunk {result_chunk_num} returned failure status"
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            print(f"\n❌ {error_msg}")
+                            print("🛑 Processing stopped due to failure (fast-fail mode)")
+                            raise Exception(f"Fast-fail: {error_msg}")
 
                         # Calculate ETA
                         elapsed = time.time() - start_time
@@ -428,13 +738,13 @@ def enhance_chunks(
                               f"Active: {len(active_chunks)} | ETA: {eta}")
 
                     except Exception as e:
-                        failed += 1
-                        completed_count += 1
-                        if chunk_num not in progress.get("failed_chunks", []):
-                            progress["failed_chunks"].append(chunk_num)
-                        progress["last_update"] = datetime.now().isoformat()
-                        pipeline.save_enhancement_progress(chunks_id, progress)
-                        print(f"❌ Chunk {chunk_num}/{total_chunks}: Exception: {e}")
+                        # Fast-fail:立即终止处理并抛出异常
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        error_msg = f"❌ Chunk {chunk_num}/{total_chunks} failed: {str(e)}"
+                        print(f"\n{error_msg}")
+                        print("🛑 Processing stopped due to error (fast-fail mode)")
+                        print(f"\n💡 To retry this chunk, run: uv run python stage4_enhance_chunks.py --chunks-id {chunks_id} --retry-failed")
+                        raise Exception(f"Fast-fail: Chunk {chunk_num} processing failed: {str(e)}")
 
             except KeyboardInterrupt:
                 print("\n\n⚠️  Interrupted! Shutting down workers...")
@@ -459,7 +769,7 @@ def enhance_chunks(
 
             completed_count += 1
 
-            # Update progress
+            # Update progress - fast-fail mode
             if success:
                 successful += 1
                 if result_chunk_num in progress.get("failed_chunks", []):
@@ -469,9 +779,12 @@ def enhance_chunks(
                     result_chunk_num
                 )
             else:
-                failed += 1
-                if result_chunk_num not in progress.get("failed_chunks", []):
-                    progress["failed_chunks"].append(result_chunk_num)
+                # Fast-fail:立即停止处理
+                error_msg = f"Chunk {result_chunk_num} failed: {message}"
+                print(f"\n❌ {error_msg}")
+                print("🛑 Processing stopped due to failure (fast-fail mode)")
+                print(f"\n💡 To retry this chunk, run: uv run python stage4_enhance_chunks.py --chunks-id {chunks_id} --retry-failed")
+                raise Exception(f"Fast-fail: {error_msg}")
 
             # Calculate ETA
             elapsed = time.time() - start_time
@@ -491,6 +804,7 @@ def enhance_chunks(
 
     # Final summary
     total_elapsed = time.time() - start_time
+
     print(f"\n{'='*60}")
     print(f"Enhancement Complete!")
     print(f"{'='*60}")
@@ -499,15 +813,18 @@ def enhance_chunks(
     print(f"Total time: {str(timedelta(seconds=int(total_elapsed)))}")
     if workers > 1:
         print(f"Workers: {workers} (avg {total_elapsed/len(chunks_needing_processing):.1f}s per chunk)")
+    print(f"Provider initialization: {provider_init_time:.2f}s")
 
+    # In fast-fail mode, we should not have any failures
     if failed > 0:
-        print(f"\n⚠️  Some chunks failed. Retry with:")
-        print(f"   uv run python stage4_enhance_chunks.py --chunks-id {chunks_id} --retry-failed --workers {workers}")
+        print(f"\n⚠️  Unexpected failures in fast-fail mode")
+        print(f"   This indicates a potential issue with the error handling")
+        return False
 
     if successful > 0:
         print(f"\n💡 Next step: uv run python stage5_generate_skill.py --enhanced-id {chunks_id}")
 
-    return failed == 0
+    return True  # In fast-fail mode, if we reached here, all chunks succeeded
 
 
 def main():

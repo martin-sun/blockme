@@ -60,11 +60,13 @@ from .quality_validator import (
 # LLM CLI Providers
 from .llm_cli_providers import (
     LLMCLIProvider,
-    ClaudeCLIProvider,
-    GeminiCLIProvider,
-    CodexCLIProvider,
     get_provider,
     detect_available_providers
+)
+from .providers import (
+    ClaudeCodeProvider,
+    GeminiCLIProvider,
+    CodexCLIProvider
 )
 
 __version__ = "0.1.0"
@@ -102,7 +104,7 @@ __all__ = [
     "validate_skill_content",
     # LLM CLI Providers
     "LLMCLIProvider",
-    "ClaudeCLIProvider",
+    "ClaudeCodeProvider",
     "GeminiCLIProvider",
     "CodexCLIProvider",
     "get_provider",

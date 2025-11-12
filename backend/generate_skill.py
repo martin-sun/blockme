@@ -17,8 +17,8 @@ Usage:
     # With local Claude
     uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --local-claude
 
-    # With GLM-Claude (via ccm)
-    uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --glm-claude
+    # With GLM API (Direct)
+    uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --glm-api
 
     # Process full document (all 151 pages, ~7-11 hours with AI)
     uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --local-codex --full
@@ -163,9 +163,9 @@ Examples:
     )
 
     parser.add_argument(
-        '--glm-claude',
+        '--glm-api',
         action='store_true',
-        help='Use GLM-Claude provider for enhancement (via ccm)'
+        help='Use GLM API provider for enhancement (direct API)'
     )
 
 
@@ -221,16 +221,16 @@ Examples:
     # Determine provider for Stage 4
     provider_name = None
     if args.local_claude:
-        provider_name = 'claude'  # 本地 Claude Code CLI
-    elif args.glm_claude:
-        provider_name = 'glm-claude'  # GLM via Claude Code Manager (ccm)
+        provider_name = 'claude'  # Local Claude Code CLI
+    elif args.glm_api:
+        provider_name = 'glm-api'  # GLM via Direct API
     elif args.local_gemini:
         provider_name = 'gemini'
     elif args.local_codex:
         provider_name = 'codex'
     else:
         print("\n❌ Error: Must specify LLM provider")
-        print("   Options: --local-claude, --glm-claude, --local-gemini, --local-codex")
+        print("   Options: --local-claude, --glm-api, --local-gemini, --local-codex")
         return 1
 
     # Verify Stage 4 provider available
@@ -240,15 +240,15 @@ Examples:
         print(f"   Check that the CLI is installed and in PATH")
         return 1
 
-    # Verify Stage 2 dependencies (GLM-4.6 via Claude Code CLI is always required)
-    glm_claude_provider = get_provider('glm-claude')
-    if not glm_claude_provider or not glm_claude_provider.is_available():
-        print(f"\n❌ Error: GLM-4.6 via Claude Code CLI is required for Stage 2 classification")
-        print("   Ensure Claude Code CLI is installed: npm install -g @anthropic-ai/claude-3-dev")
-        print("   Ensure ccm script is available in ~/.local/share/ccm/")
+    # Verify Stage 2 dependencies (GLM-4.6 via Direct API is always required)
+    glm_api_provider = get_provider('glm-api')
+    if not glm_api_provider or not glm_api_provider.is_available():
+        print(f"\n❌ Error: GLM-4.6 via Direct API is required for Stage 2 classification")
+        print("   Ensure GLM_API_KEY environment variable is set")
+        print("   Ensure openai package is installed: pip install openai>=1.50.0")
         return 1
 
-    print(f"🤖 Stage 2 Provider: GLM-4.6 via Claude Code (semantic classification)")
+    print(f"🤖 Stage 2 Provider: GLM-4.6 via Direct API (semantic classification)")
     print(f"🤖 Stage 4 Provider: {provider_name} (chunk enhancement)")
 
     # Calculate PDF hash for cache

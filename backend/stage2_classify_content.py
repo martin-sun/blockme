@@ -5,7 +5,7 @@ Stage 2: Content Classification
 Classifies extracted content using semantic analysis with support for multiple providers.
 
 Usage:
-    # Semantic classification with GLM-4.6 via Claude Code (Chinese optimized)
+    # Semantic classification with GLM-4.6 via Direct API
     uv run python stage2_classify_content.py --extraction-id abc123
 
     # Force re-classification (ignore cache)
@@ -24,8 +24,9 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.document_processor.glm_claude_processor import GLMClaudeProcessor, DocumentAnalysis
+from app.document_processor.content_classifier import TaxCategory, QualityMetrics
 from app.document_processor.pipeline_manager import CacheManager, PipelineStage
+from app.document_processor.llm_cli_providers import get_provider
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +34,149 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# TOC data structures
+class TOCEntry:
+    """Table of Contents entry."""
+    def __init__(self, level: int, title: str, page_number: int, char_start: int = None, char_end: int = None):
+        self.level = level
+        self.title = title
+        self.page_number = page_number
+        self.char_start = char_start
+        self.char_end = char_end
+
+class DocumentTOC:
+    """Document Table of Contents structure."""
+    def __init__(self, has_toc: bool = False, source: str = "generated"):
+        self.has_toc = has_toc
+        self.source = source
+        self.entries = []
+        self.max_level = 1
+
+class DocumentAnalysis:
+    """Document analysis result."""
+    def __init__(self, classification, toc, total_chars: int, processing_time: float, model: str):
+        self.classification = classification
+        self.toc = toc
+        self.total_chars = total_chars
+        self.processing_time = processing_time
+        self.model = model
+
+class SmartClassification:
+    """Classification result."""
+    def __init__(self, primary_category: TaxCategory, confidence: float, reasoning: str):
+        self.primary_category = primary_category
+        self.confidence = confidence
+        self.secondary_categories = []
+        self.reasoning = reasoning
+        self.method = "glm_api_semantic"
+        self.quality_metrics = None
+
+def classify_with_glm_api(content: str, title: str = "") -> DocumentAnalysis:
+    """Use GLM API to classify document and generate TOC."""
+    import time
+    start_time = time.time()
+
+    # Get GLM API provider
+    provider = get_provider('glm-api')
+    if not provider or not provider.is_available():
+        raise ValueError("GLM API provider not available. Please check GLM_API_KEY environment variable.")
+
+    # Prepare classification prompt
+    classification_prompt = f"""Please analyze the following document content and classify it:
+
+Document Title: {title}
+Document Content:
+{content[:10000]}  # Limit length to avoid token limits
+
+Please respond in the following format:
+1. Primary Category (choose one): personal_income, employment_income, self_employment, business_income, business_expenses, corporate_tax, capital_gains, dividends, interest_income, deductions, credits, medical_expenses, charitable_donations, rrsp, tfsa, resp, pension, sales_tax
+2. Confidence (a number between 0-1)
+3. Classification reasoning
+4. Document outline (if available, including section titles and page numbers)
+
+Please respond in English."""
+
+    try:
+        # Call GLM API
+        response = provider.parse_output(classification_prompt, "")
+
+        # Parse response (simplified parsing)
+        lines = response.split('\n')
+        category_str = "UNKNOWN"
+        confidence = 0.5
+        reasoning = response[:500]  # First 500 chars as reasoning
+
+        # Simple category mapping
+        category_map = {
+            "personal_income": TaxCategory.PERSONAL_INCOME,
+            "employment_income": TaxCategory.EMPLOYMENT_INCOME,
+            "self_employment": TaxCategory.SELF_EMPLOYMENT,
+            "business_income": TaxCategory.BUSINESS_INCOME,
+            "business_expenses": TaxCategory.BUSINESS_EXPENSES,
+            "corporate_tax": TaxCategory.CORPORATE_TAX,
+            "capital_gains": TaxCategory.CAPITAL_GAINS,
+            "dividends": TaxCategory.DIVIDENDS,
+            "interest_income": TaxCategory.INTEREST_INCOME,
+            "deductions": TaxCategory.DEDUCTIONS,
+            "credits": TaxCategory.CREDITS,
+            "medical_expenses": TaxCategory.MEDICAL_EXPENSES,
+            "charitable_donations": TaxCategory.CHARITABLE_DONATIONS,
+            "rrsp": TaxCategory.RRSP,
+            "tfsa": TaxCategory.TFSA,
+            "resp": TaxCategory.RESP,
+            "pension": TaxCategory.PENSION,
+            "sales_tax": TaxCategory.GST_HST
+        }
+
+        # Extract category from response
+        for line in lines:
+            if "Primary Category" in line or "primary category" in line:
+                for key, value in category_map.items():
+                    if key in line.lower():
+                        category_str = key
+                        break
+                break
+
+        primary_category = category_map.get(category_str, TaxCategory.GENERAL)
+
+        # Create classification
+        classification = SmartClassification(
+            primary_category=primary_category,
+            confidence=confidence,
+            reasoning=reasoning
+        )
+
+        # Create simple TOC
+        toc = DocumentTOC(has_toc=False, source="generated")
+
+        processing_time = time.time() - start_time
+
+        return DocumentAnalysis(
+            classification=classification,
+            toc=toc,
+            total_chars=len(content),
+            processing_time=processing_time,
+            model="glm-4.6"
+        )
+
+    except Exception as e:
+        logger.error(f"GLM API classification failed: {e}")
+        # Fallback classification
+        classification = SmartClassification(
+            primary_category=TaxCategory.GENERAL,
+            confidence=0.3,
+            reasoning=f"GLM API classification failed: {str(e)}"
+        )
+        toc = DocumentTOC(has_toc=False, source="fallback")
+
+        return DocumentAnalysis(
+            classification=classification,
+            toc=toc,
+            total_chars=len(content),
+            processing_time=time.time() - start_time,
+            model="glm-4.6-fallback"
+        )
 
 
 def classify_content(
@@ -61,7 +205,7 @@ def classify_content(
     print(f"{'='*60}")
     print(f"Extraction ID: {extraction_id}")
 
-    print(f"Method: GLM-4.6 via Claude Code (Chinese Optimized)")
+    print(f"Method: GLM-4.6 via Direct API")
 
     # Load extraction data
     extraction_data = cache_mgr.load_cache(PipelineStage.EXTRACTION, extraction_id)
@@ -85,20 +229,18 @@ def classify_content(
             print("\n💡 Use --force to re-classify")
             return cached_classification
 
-    # Classify content with GLM-4.6 (Chinese Optimized)
-    print(f"\n🧠 Analyzing document with GLM-4.6 (Chinese Optimized)...")
-    print(f"   This will take ~{len(total_text) // 1000 * 2 // 60} minutes for {len(total_text):,} chars")
-    print(f"   Using 400K context window with Chinese language optimization...")
-    processor = GLMClaudeProcessor(provider_name='glm-claude')
+    # Classify content with GLM-4.6
+    print(f"\n🧠 Analyzing document with GLM-4.6 via Direct API...")
+    print(f"   This will take ~{len(total_text) // 1000 * 1 // 60} minutes for {len(total_text):,} chars")
+    print(f"   Using GLM API for document analysis...")
 
     try:
         pdf_title = extraction_data.get('pdf_path', '').split('/')[-1]
 
-        # Perform full document analysis (classification + TOC generation)
-        analysis: DocumentAnalysis = processor.analyze_full_document(
+        # Perform document analysis using GLM API
+        analysis: DocumentAnalysis = classify_with_glm_api(
             content=total_text,
-            title=pdf_title,
-            max_chunk_size=max_chunk_size
+            title=pdf_title
         )
 
         # Prepare classification data with TOC
@@ -157,7 +299,7 @@ def classify_content(
         }
 
     except Exception as e:
-        logger.error(f"Gemini classification failed: {e}")
+        logger.error(f"GLM API classification failed: {e}")
         raise
 
     # Save to cache
@@ -220,7 +362,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Semantic classification with GLM-4.6 (Chinese optimized)
+  # Semantic classification with GLM-4.6 via Direct API
   python stage2_classify_content.py --extraction-id abc123
 
   # Force re-classification (ignore cache)

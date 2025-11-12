@@ -26,7 +26,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 from app.document_processor.pipeline_manager import PipelineManager, CacheManager, PipelineStage
 from app.document_processor.skill_generator import SkillGenerator
 from app.document_processor.content_classifier import ClassificationResult, TaxCategory
-from app.document_processor.glm_claude_processor import GLMClaudeProcessor
 from app.document_processor.dynamic_classifier import DynamicSemanticClassifier
 
 # Configure logging
@@ -268,7 +267,7 @@ def generate_skill_directory(
     elif provider == "dynamic-semantic":
         print(f"🧠 Using Dynamic Semantic Classification provider...")
         try:
-            from app.document_processor.glm_claude_processor import DocumentChunk, DocumentSplitter
+            # Document structures are now defined inline
 
             # Use existing enhanced chunks as TOC entries for dynamic classification
             toc_entries = []
@@ -282,7 +281,7 @@ def generate_skill_directory(
                 })
 
             # Create dynamic classifier
-            dynamic_classifier = DynamicSemanticClassifier(provider_name="glm-claude")
+            dynamic_classifier = DynamicSemanticClassifier(provider_name="glm-api")
 
             print(f"📊 Performing dynamic semantic classification...")
             # Since we're in sync context, we'll use a synchronous approach

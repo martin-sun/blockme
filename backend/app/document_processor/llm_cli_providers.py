@@ -869,6 +869,194 @@ class CodexCLIProvider(LLMCLIProvider):
         return "OpenAI Codex"
 
 
+class GLMAPIProvider(LLMCLIProvider):
+    """
+    Provider for GLM API using OpenAI SDK.
+
+    Uses the OpenAI Python SDK to call GLM models directly via API.
+    This is an API-based provider, not a CLI tool.
+
+    Features:
+    - Uses GLM-4.6 model (high quality)
+    - 128K token context window
+    - Direct API integration (no CLI needed)
+    - Optimized for document processing
+
+    Configuration:
+    - Requires GLM_API_KEY environment variable
+    - Base URL: https://open.bigmodel.cn/api/coding/paas/v4
+    - Model: glm-4.6 (can be changed via model parameter)
+
+    Installation:
+        pip install openai>=1.50.0
+    """
+
+    def __init__(self, model: str = "glm-4.6"):
+        """
+        Initialize GLM API Provider.
+
+        Args:
+            model: GLM model to use (default: glm-4.6)
+        """
+        self.model = model
+        self._client = None
+
+    def _get_client(self):
+        """Lazy initialization of OpenAI client for GLM API."""
+        if self._client is None:
+            api_key = os.environ.get("GLM_API_KEY")
+            if not api_key:
+                raise ValueError("GLM_API_KEY environment variable is required")
+
+            try:
+                from openai import OpenAI
+                self._client = OpenAI(
+                    api_key=api_key,
+                    base_url="https://open.bigmodel.cn/api/coding/paas/v4"
+                )
+            except ImportError:
+                raise ImportError("openai package is required. Install with: pip install openai>=1.50.0")
+
+        return self._client
+
+    def is_available(self) -> bool:
+        """Check if GLM API is available (API key exists and package installed)."""
+        try:
+            api_key = os.environ.get("GLM_API_KEY")
+            if not api_key:
+                return False
+
+            from openai import OpenAI
+            return True
+        except ImportError:
+            return False
+
+    def build_command(self, prompt: str) -> list[str]:
+        """
+        GLM API doesn't use CLI commands.
+
+        This method is not used for API-based providers.
+        The actual API call is made in parse_output method.
+
+        Args:
+            prompt: The enhancement prompt
+
+        Returns:
+            Empty list (not used for API providers)
+        """
+        return []
+
+    def parse_output(self, stdout: str, stderr: str) -> str:
+        """
+        Call GLM API and parse response.
+
+        For API-based providers, this method handles the actual API call.
+        The stdout parameter contains the prompt to process.
+
+        Args:
+            stdout: The prompt to send to GLM API
+            stderr: Not used for API providers
+
+        Returns:
+            str: Enhanced content from GLM API
+
+        Raises:
+            ValueError: If API call fails or returns invalid response
+        """
+        prompt = stdout.strip()
+
+        if len(prompt) < 10:
+            raise ValueError(f"Prompt too short: {len(prompt)} chars")
+
+        try:
+            client = self._get_client()
+
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,      # Lower temperature for consistent output
+                max_tokens=8192,     # Reasonable output limit
+                top_p=0.95,          # Nucleus sampling threshold
+            )
+
+            enhanced = response.choices[0].message.content.strip()
+
+            if len(enhanced) < 50:
+                raise ValueError(f"GLM API response too short: {len(enhanced)} chars")
+
+            return enhanced
+
+        except Exception as e:
+            raise ValueError(f"GLM API call failed: {str(e)}")
+
+    def get_timeout(self, content_length: int) -> int:
+        """
+        Calculate timeout for GLM API.
+
+        GLM API typically has fast response times.
+        Formula: max(120 seconds, 2 seconds per 1K characters)
+
+        Args:
+            content_length: Length of content to be processed
+
+        Returns:
+            int: Timeout in seconds
+        """
+        if content_length < 100_000:
+            # Small documents: 2 minute minimum
+            MIN_TIMEOUT = 120
+            TIMEOUT_PER_1K = 2
+            return max(MIN_TIMEOUT, content_length // 1000 * TIMEOUT_PER_1K)
+
+        elif content_length < 500_000:
+            # Medium documents: moderate processing time
+            TIMEOUT_PER_1K = 2
+            return content_length // 1000 * TIMEOUT_PER_1K
+
+        else:
+            # Large documents: generous timeout
+            TIMEOUT_PER_1K = 3
+            timeout = content_length // 1000 * TIMEOUT_PER_1K
+
+            # Add extra buffer for very large docs (>1M)
+            if content_length > 1_000_000:
+                timeout = int(timeout * 1.1)  # +10% safety margin
+
+            return timeout
+
+    def uses_stdin(self) -> bool:
+        """GLM API doesn't use stdin (direct Python calls)."""
+        return False
+
+    def is_api_based(self) -> bool:
+        """GLM API provider uses API directly."""
+        return True
+
+    def get_max_chunk_size(self) -> int:
+        """
+        Get maximum chunk size for GLM.
+
+        Based on GLM specifications:
+        - 128K token context window
+        - ~4 chars per token ratio
+        - Theoretical max: ~512K chars
+
+        Using 400K chars (~100K tokens) provides:
+        - High throughput for large documents
+        - Leaves 28K tokens for output and safety margin
+        - Optimal balance between speed and reliability
+
+        Returns:
+            int: 400,000 characters
+        """
+        return 400_000
+
+    @property
+    def name(self) -> str:
+        return f"GLM API ({self.model})"
+
 
 def get_provider(provider_name: str) -> Optional[LLMCLIProvider]:
     """
@@ -887,7 +1075,7 @@ def get_provider(provider_name: str) -> Optional[LLMCLIProvider]:
     """
     providers = {
         'claude': ClaudeCLIProvider,
-        'glm-claude': GLMClaudeCodeProvider,
+        'glm-api': GLMAPIProvider,
         'gemini': GeminiCLIProvider,
         'gemini-api': GeminiAPIProvider,
         'codex': CodexCLIProvider,
@@ -911,7 +1099,7 @@ def detect_available_providers() -> list[str]:
         print(f"Available providers: {', '.join(available)}")
     """
     available = []
-    for name in ['claude', 'glm-claude', 'gemini', 'gemini-api', 'codex']:
+    for name in ['claude', 'glm-api', 'gemini', 'gemini-api', 'codex']:
         provider = get_provider(name)
         if provider and provider.is_available():
             available.append(name)

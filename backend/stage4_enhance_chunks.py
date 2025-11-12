@@ -498,7 +498,7 @@ def enhance_chunks(
 
     Args:
         chunks_id: Chunks cache hash ID
-        provider_name: LLM provider name (claude/gemini/codex/glm-claude)
+        provider_name: LLM provider name (claude/gemini/codex/glm-api)
         resume: Resume from last completed chunk
         retry_failed: Retry only failed chunks
         force: Force restart from beginning
@@ -738,7 +738,7 @@ def enhance_chunks(
                               f"Active: {len(active_chunks)} | ETA: {eta}")
 
                     except Exception as e:
-                        # Fast-fail:立即终止处理并抛出异常
+                        # Fast-fail: immediately terminate processing and raise exception
                         executor.shutdown(wait=False, cancel_futures=True)
                         error_msg = f"❌ Chunk {chunk_num}/{total_chunks} failed: {str(e)}"
                         print(f"\n{error_msg}")
@@ -779,7 +779,7 @@ def enhance_chunks(
                     result_chunk_num
                 )
             else:
-                # Fast-fail:立即停止处理
+                # Fast-fail: immediately stop processing
                 error_msg = f"Chunk {result_chunk_num} failed: {message}"
                 print(f"\n❌ {error_msg}")
                 print("🛑 Processing stopped due to failure (fast-fail mode)")
@@ -845,8 +845,8 @@ Examples:
   # Force restart
   python stage4_enhance_chunks.py --chunks-id abc123 --provider codex --force
 
-  # Using GLM through Claude Code
-  python stage4_enhance_chunks.py --chunks-id abc123 --provider glm-claude
+  # Using GLM through Direct API
+  python stage4_enhance_chunks.py --chunks-id abc123 --provider glm-api
         """
     )
 
@@ -860,7 +860,7 @@ Examples:
     parser.add_argument(
         '--provider',
         type=str,
-        choices=['claude', 'gemini', 'codex', 'glm-claude'],
+        choices=['claude', 'gemini', 'codex', 'glm-api'],
         help='LLM provider to use (required unless --resume)'
     )
 

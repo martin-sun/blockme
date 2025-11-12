@@ -8,7 +8,7 @@
 ### 1. 动态语义分类系统 ✅
 - **完整实现**: `app/document_processor/dynamic_classifier.py`
 - **三阶段分析**: 深度语义分析 → 动态分类生成 → 验证优化
-- **真实LLM集成**: 通过 GLM-Claude provider 实现
+- **真实LLM集成**: 通过 GLM API provider 实现
 - **数据模型**: DynamicCategory, SemanticTag, DynamicClassification, DocumentProfile
 - **JSON处理**: 支持markdown代码块解析和fallback机制
 
@@ -21,8 +21,8 @@
 - **统一GLM-4.6**: Stage 2 自动使用GLM-4.6进行分类
 - **双Provider支持**:
   - `--local-claude`: 本地Claude Code CLI
-  - `--glm-claude`: GLM通过Claude Code Manager (ccm)
-- **移除冗余**: 删除了 `--glm-api` 参数，简化系统
+  - `--glm-api`: GLM通过直接API调用
+- **统一API**: 直接使用GLM API，无需ccm依赖
 
 ## 🧪 测试结果验证
 
@@ -47,7 +47,7 @@
 ## 📋 当前系统架构
 
 ### Stage 2: 分类
-- **统一使用**: GLM-4.6 via Claude Code CLI
+- **统一使用**: GLM-4.6 via Direct API
 - **无需参数**: 自动进行语义分析
 - **高置信度**: 平均置信度0.95+
 

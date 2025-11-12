@@ -1,19 +1,20 @@
 """
-Dynamic Semantic Classifier - 完全动态的语义分类系统
+Dynamic Semantic Classifier - Fully Dynamic Semantic Classification System
 
-基于LLM的语义理解，自动为任何类型文档生成动态分类体系，
-摆脱硬编码分类的限制，实现真正的智能文档分类。
+Uses LLM-based semantic understanding to automatically generate dynamic classification systems
+for any type of document, breaking free from hardcoded classification limitations to achieve
+true intelligent document classification.
 
-主要功能:
-1. 深度语义分析 - 理解文档特征、主题、结构
-2. 动态分类生成 - 基于分析结果生成分类体系
-3. 验证优化 - 确保分类质量和一致性
+Main Functions:
+1. Deep Semantic Analysis - Understand document features, topics, structure
+2. Dynamic Classification Generation - Generate classification systems based on analysis results
+3. Validation and Optimization - Ensure classification quality and consistency
 
-特点:
-- 无需预定义分类，完全自适应
-- 基于语义理解生成有意义的分类名称
-- 层次化标签结构
-- 置信度评估和优化建议
+Features:
+- No predefined categories needed, fully adaptive
+- Generate meaningful category names based on semantic understanding
+- Hierarchical tag structure
+- Confidence assessment and optimization suggestions
 """
 
 import json
@@ -94,12 +95,12 @@ class DynamicSemanticClassifier:
     3. 验证优化 - 确保分类质量和一致性
     """
 
-    def __init__(self, provider_name: str = "glm-claude"):
+    def __init__(self, provider_name: str = "glm-api"):
         """
-        初始化动态语义分类器
+        Initialize Dynamic Semantic Classifier
 
         Args:
-            provider_name: LLM provider 名称 (默认: glm-claude)
+            provider_name: LLM provider name (default: glm-api)
         """
         self.provider = get_provider(provider_name)
 

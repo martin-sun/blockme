@@ -95,14 +95,16 @@ class DynamicSemanticClassifier:
     3. 验证优化 - 确保分类质量和一致性
     """
 
-    def __init__(self, provider_name: str = "glm-api"):
+    def __init__(self, provider_name: str = "glm-api", enable_thinking: bool = True):
         """
         Initialize Dynamic Semantic Classifier
 
         Args:
             provider_name: LLM provider name (default: glm-api)
+            enable_thinking: Enable thinking mode for complex semantic analysis (default: True)
         """
-        self.provider = get_provider(provider_name)
+        # Dynamic semantic classification requires deep reasoning, enable thinking by default
+        self.provider = get_provider(provider_name, enable_thinking=enable_thinking)
 
         if not self.provider.is_available():
             raise RuntimeError(
@@ -110,7 +112,8 @@ class DynamicSemanticClassifier:
                 f"Please ensure the provider is properly configured."
             )
 
-        logger.info(f"Initialized DynamicSemanticClassifier with provider: {provider_name}")
+        thinking_status = "with thinking mode" if enable_thinking else "without thinking mode"
+        logger.info(f"Initialized DynamicSemanticClassifier with provider: {provider_name} {thinking_status}")
 
     def build_semantic_analysis_prompt(self, content: str, title: str, toc_entries: List) -> str:
         """

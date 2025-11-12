@@ -33,14 +33,16 @@ class GLMAPIProvider:
         pip install zhipuai>=2.0.0
     """
 
-    def __init__(self, model: str = "glm-4.6"):
+    def __init__(self, model: str = "glm-4.6", enable_thinking: bool = False):
         """
         Initialize GLM API Provider.
 
         Args:
             model: GLM model to use (default: glm-4.6)
+            enable_thinking: Enable thinking mode for complex reasoning tasks (default: False)
         """
         self.model = model
+        self.enable_thinking = enable_thinking
         self._client = None
 
     def _get_client(self):
@@ -52,8 +54,11 @@ class GLMAPIProvider:
 
             try:
                 from zhipuai import ZhipuAI
-                self._client = ZhipuAI(api_key=api_key)
-                logger.info("ZhipuAI client initialized successfully")
+                self._client = ZhipuAI(
+                    api_key=api_key,
+                    base_url="https://open.bigmodel.cn/api/coding/paas/v4/"
+                )
+                logger.info("ZhipuAI client initialized successfully with coding endpoint")
             except ImportError:
                 raise ImportError("zhipuai package is required. Install with: pip install zhipuai>=2.0.0")
 
@@ -121,6 +126,13 @@ class GLMAPIProvider:
                 "max_tokens": 8192,   # Reasonable output limit
                 "top_p": 0.95,        # Nucleus sampling threshold
             }
+
+            # Enable thinking mode if configured
+            if self.enable_thinking:
+                request_params["thinking"] = {
+                    "type": "enabled"
+                }
+                logger.debug("Thinking mode enabled for this request")
 
             # Log request details
             logger.debug(

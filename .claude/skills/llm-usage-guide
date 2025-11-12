@@ -134,7 +134,7 @@ class GLMProvider(BaseLLMProvider):
         super().__init__(LLMProvider.GLM)
         self.client = AsyncOpenAI(
             api_key=env_config.glm_api_key,
-            base_url="https://open.bigmodel.cn/api/paas/v4/"
+            base_url="https://open.bigmodel.cn/api/coding/paas/v4/"
         )
 
     async def analyze_document(self, content: str, document_type: str) -> Dict[str, Any]:

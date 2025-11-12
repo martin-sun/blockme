@@ -390,10 +390,15 @@ def process_chunk_worker(
         logger.debug(f"  - Content length: {chunk_data.get('char_count', 'unknown')}")
 
         # Initialize provider in this subprocess
-        provider = get_provider(provider_name)
+        # Enable thinking mode for GLM API to improve content quality
+        enable_thinking = (provider_name.lower() == 'glm-api')
+        provider = get_provider(provider_name, enable_thinking=enable_thinking)
 
         if not provider:
             raise Exception(f"Provider '{provider_name}' not available")
+
+        if enable_thinking:
+            logger.info(f"Thinking mode enabled for provider '{provider_name}'")
 
         logger.debug(f"Provider '{provider_name}' initialized successfully")
 
@@ -580,17 +585,25 @@ def enhance_chunks(
     # Determine provider
     if provider_name:
         print(f"\nProvider: {provider_name}")
-        provider = get_provider(provider_name)
+        # Enable thinking mode for GLM API to improve content quality
+        enable_thinking = (provider_name.lower() == 'glm-api')
+        provider = get_provider(provider_name, enable_thinking=enable_thinking)
         if not provider:
             print(f"❌ Error: Provider '{provider_name}' not available")
             return False
+        if enable_thinking:
+            print(f"✓ Thinking mode enabled for '{provider_name}'")
     elif resume and progress:
         provider_name = progress.get("provider")
         print(f"\nResuming with provider: {provider_name}")
-        provider = get_provider(provider_name)
+        # Enable thinking mode for GLM API to improve content quality
+        enable_thinking = (provider_name.lower() == 'glm-api')
+        provider = get_provider(provider_name, enable_thinking=enable_thinking)
         if not provider:
             print(f"❌ Error: Provider '{provider_name}' not available")
             return False
+        if enable_thinking:
+            print(f"✓ Thinking mode enabled for '{provider_name}'")
     else:
         print(f"❌ Error: Provider required (use --provider)")
         return False

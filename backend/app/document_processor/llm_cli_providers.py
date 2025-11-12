@@ -156,20 +156,21 @@ class LLMCLIProvider(ABC):
 
 
 
-def get_provider(provider_name: str) -> Optional[LLMCLIProvider]:
+def get_provider(provider_name: str, enable_thinking: bool = False) -> Optional[LLMCLIProvider]:
     """
     Factory function to get a provider instance by name.
 
     Args:
         provider_name: Name of the provider ('claude', 'glm-claude', 'gemini', 'gemini-api', 'codex')
+        enable_thinking: Enable thinking mode for providers that support it (default: False)
 
     Returns:
         LLMCLIProvider instance or None if provider not found
 
     Example:
-        provider = get_provider('glm-claude')
+        provider = get_provider('glm-api', enable_thinking=True)
         if provider and provider.is_available():
-            # Use GLM through Claude Code...
+            # Use GLM API with thinking mode enabled...
     """
     providers = {
         'claude': ClaudeCodeProvider,
@@ -181,7 +182,11 @@ def get_provider(provider_name: str) -> Optional[LLMCLIProvider]:
 
     provider_class = providers.get(provider_name.lower())
     if provider_class:
-        return provider_class()
+        # GLMAPIProvider supports enable_thinking parameter
+        if provider_name.lower() == 'glm-api':
+            return provider_class(enable_thinking=enable_thinking)
+        else:
+            return provider_class()
     return None
 
 

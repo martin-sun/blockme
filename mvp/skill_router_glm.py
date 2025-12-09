@@ -1,5 +1,5 @@
 """
-Skill Router - 使用 GLM API 路由相关 Skills
+Skill Router - Route relevant Skills using GLM API
 """
 import os
 import json
@@ -8,30 +8,30 @@ from zhipuai import ZhipuAI
 
 
 class SkillRouterGLM:
-    """使用 GLM API 路由 Skills"""
+    """Route Skills using GLM API"""
 
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("GLM_API_KEY")
         if not self.api_key:
-            raise ValueError("未找到 GLM_API_KEY")
+            raise ValueError("GLM_API_KEY not found")
 
         self.client = ZhipuAI(api_key=self.api_key)
-        # GLM-4-Flash 免费版
+        # GLM-4-Flash free tier
         self.model = "glm-4-flash"
 
     def route(self, user_query: str, available_skills: List[dict]) -> Dict:
         """
-        路由用户问题到相关 Skills
+        Route user query to relevant Skills.
 
         Args:
-            user_query: 用户问题
-            available_skills: 可用的 Skills 元数据列表
+            user_query: User's question
+            available_skills: List of available Skills metadata
 
         Returns:
             {
                 "matched_skills": ["skill-id-1", "skill-id-2"],
                 "confidence": "high" | "medium" | "low",
-                "reasoning": "为什么选择这些 Skills 的推理过程"
+                "reasoning": "Reasoning for selecting these Skills"
             }
         """
         prompt = self._build_routing_prompt(user_query, available_skills)
@@ -43,25 +43,25 @@ class SkillRouterGLM:
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=1024,
-                temperature=0.1  # 低温度以获得更一致的结果
+                temperature=0.1  # Low temperature for more consistent results
             )
 
             result_text = response.choices[0].message.content
             result = self._parse_routing_result(result_text)
 
-            print(f"\n🎯 路由结果 (GLM):")
-            print(f"  - 匹配 Skills: {result['matched_skills']}")
-            print(f"  - 置信度: {result['confidence']}")
-            print(f"  - 推理: {result['reasoning']}\n")
+            print(f"\n🎯 Routing Result (GLM):")
+            print(f"  - Matched Skills: {result['matched_skills']}")
+            print(f"  - Confidence: {result['confidence']}")
+            print(f"  - Reasoning: {result['reasoning']}\n")
 
             return result
 
         except Exception as e:
-            print(f"❌ 路由失败: {e}")
+            print(f"❌ Routing failed: {e}")
             return {
                 "matched_skills": [],
                 "confidence": "low",
-                "reasoning": f"路由失败: {str(e)}"
+                "reasoning": f"Routing failed: {str(e)}"
             }
 
     def _build_routing_prompt(self, user_query: str, available_skills: List[dict]) -> str:
@@ -102,9 +102,9 @@ Return only JSON, no other content."""
         return prompt
 
     def _parse_routing_result(self, result_text: str) -> Dict:
-        """解析 GLM 返回的路由结果"""
+        """Parse routing result from GLM."""
         try:
-            # 提取 JSON（可能被包裹在 ```json ... ``` 中）
+            # Extract JSON (may be wrapped in ```json ... ```)
             if "```json" in result_text:
                 json_start = result_text.find("```json") + 7
                 json_end = result_text.find("```", json_start)
@@ -118,23 +118,23 @@ Return only JSON, no other content."""
 
             result = json.loads(json_str)
 
-            # 验证必需字段
+            # Validate required fields
             if "matched_skills" not in result:
                 result["matched_skills"] = []
             if "confidence" not in result:
                 result["confidence"] = "medium"
             if "reasoning" not in result:
-                result["reasoning"] = "未提供推理"
+                result["reasoning"] = "No reasoning provided"
 
             return result
 
         except json.JSONDecodeError as e:
-            print(f"⚠️  JSON 解析失败: {e}")
-            print(f"原始输出: {result_text}")
+            print(f"⚠️  JSON parse failed: {e}")
+            print(f"Raw output: {result_text}")
             return {
                 "matched_skills": [],
                 "confidence": "low",
-                "reasoning": "解析失败"
+                "reasoning": "Parse failed"
             }
 
 

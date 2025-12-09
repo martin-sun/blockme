@@ -17,6 +17,7 @@ BeanFlow-CRA 是一个基于 LLM 的 CRA 税务文档处理与智能问答系统
 | 文档 | 说明 |
 |------|------|
 | [Pipeline 架构](architecture/PIPELINE_ARCHITECTURE.md) | 6 阶段文档处理流水线详解 |
+| [Skills 组织架构](architecture/SKILLS_ORGANIZATION.md) | Skill 目录结构和路由机制 |
 | [SKILL.md 增强](architecture/SKILL_ENHANCEMENT.md) | Skill 文件增强功能设计 |
 | [LLM Provider 系统](architecture/LLM_PROVIDERS.md) | Claude、GLM、Gemini 等 Provider 集成 |
 
@@ -41,7 +42,8 @@ BeanFlow-CRA 是一个基于 LLM 的 CRA 税务文档处理与智能问答系统
 
 ### 开发者
 1. 了解 [Pipeline 架构](architecture/PIPELINE_ARCHITECTURE.md) 理解系统设计
-2. 查看 [LLM Provider 系统](architecture/LLM_PROVIDERS.md) 了解如何扩展
+2. 了解 [Skills 组织架构](architecture/SKILLS_ORGANIZATION.md) 理解路由机制
+3. 查看 [LLM Provider 系统](architecture/LLM_PROVIDERS.md) 了解如何扩展
 
 ### 设计师
 1. 参考 [设计系统](BEANFLOW_DESIGN_SYSTEM.md) 了解品牌规范
@@ -78,4 +80,4 @@ BeanFlow-CRA/
 ---
 
 **维护者**: BeanFlow Team
-**最后更新**: 2025-12-08
+**最后更新**: 2025-12-09

@@ -52,17 +52,124 @@ logger = logging.getLogger(__name__)
 MAX_CHUNK_SIZE = 30_000
 
 
+def _estimate_toc_end_position(content: str, toc_entries: list[dict]) -> int:
+    """
+    Estimate where the Table of Contents block ends in the document.
+
+    Uses heuristics to find the end of TOC:
+    1. Look for common TOC end markers
+    2. Estimate based on number of TOC entries (each entry ~50-100 chars in TOC listing)
+    3. Cap at reasonable percentage of document (TOC rarely exceeds 10%)
+
+    Args:
+        content: Full document content
+        toc_entries: List of TOC entries
+
+    Returns:
+        Estimated character position where TOC block ends
+    """
+    # Heuristic 1: Look for common patterns that indicate end of TOC
+    # e.g., "Chapter 1", "Part 1", "Introduction" at start of line after some content
+    toc_end_patterns = [
+        r'\n\s*#{1,2}\s+',  # Markdown heading (# or ##)
+        r'\n\s*Chapter\s+\d',  # Chapter N
+        r'\n\s*Part\s+\d',  # Part N
+        r'\n\s*Section\s+\d',  # Section N
+        r'\n-{3,}\n',  # Horizontal rule (---)
+        r'\n\*{3,}\n',  # Horizontal rule (***)
+        r'\n_{3,}\n',  # Horizontal rule (___)
+    ]
+
+    # Start searching after a minimum offset (TOC needs some space)
+    min_toc_size = min(500, len(content) // 20)
+
+    for pattern in toc_end_patterns:
+        matches = list(re.finditer(pattern, content))
+        for match in matches:
+            # Skip matches too early (likely still in TOC header)
+            if match.start() > min_toc_size:
+                return match.start()
+
+    # Heuristic 2: Estimate based on TOC entry count
+    # Each TOC entry typically takes ~80 chars in the listing
+    estimated_toc_size = len(toc_entries) * 80
+
+    # Heuristic 3: Cap at 10% of document
+    max_toc_size = len(content) // 10
+
+    # Use the smaller of estimated and max, but at least min_toc_size
+    toc_end = max(min_toc_size, min(estimated_toc_size, max_toc_size))
+
+    return toc_end
+
+
+def _find_title_with_heading_context(content: str, title: str, search_start: int = 0) -> re.Match | None:
+    """
+    Find a title in content, preferring matches that look like section headings.
+
+    Prioritizes matches that:
+    1. Are preceded by newline + optional # (markdown heading)
+    2. Are preceded by newline + whitespace (start of paragraph)
+    3. Any match as fallback
+
+    Args:
+        content: Document content to search
+        title: Title to find
+        search_start: Position to start searching from
+
+    Returns:
+        Match object or None
+    """
+    search_content = content[search_start:]
+
+    # Strategy 1: Look for markdown heading format (# Title or ## Title)
+    heading_pattern = r'(?:^|\n)\s*#{1,3}\s*' + re.escape(title)
+    match = re.search(heading_pattern, search_content, re.IGNORECASE)
+    if match:
+        # Adjust position to actual title start (skip the # prefix)
+        title_match = re.search(re.escape(title), search_content[match.start():], re.IGNORECASE)
+        if title_match:
+            return re.Match.__new__(re.Match) if False else \
+                   type('Match', (), {
+                       'start': lambda: search_start + match.start() + title_match.start(),
+                       'end': lambda: search_start + match.start() + title_match.end()
+                   })()
+
+    # Strategy 2: Look for title at start of line (after newline)
+    line_start_pattern = r'(?:^|\n)\s*' + re.escape(title)
+    match = re.search(line_start_pattern, search_content, re.IGNORECASE)
+    if match:
+        title_match = re.search(re.escape(title), search_content[match.start():], re.IGNORECASE)
+        if title_match:
+            return type('Match', (), {
+                'start': lambda s=search_start, m=match, tm=title_match: s + m.start() + tm.start(),
+                'end': lambda s=search_start, m=match, tm=title_match: s + m.start() + tm.end()
+            })()
+
+    # Strategy 3: Fallback to simple search
+    pattern = re.escape(title)
+    match = re.search(pattern, search_content, re.IGNORECASE)
+    if match:
+        return type('Match', (), {
+            'start': lambda s=search_start, m=match: s + m.start(),
+            'end': lambda s=search_start, m=match: s + m.end()
+        })()
+
+    return None
+
+
 def locate_toc_entries_in_content(content: str, toc_entries: list[dict]) -> list[dict]:
     """
     Locate TOC entries in document content by searching for titles.
 
     Stage 2's TOC only has page_number, not char_start.
-    This function searches for title text to determine character positions.
+    This function searches for title text to determine character positions,
+    skipping the TOC block itself to find actual section headings.
 
     Search strategy:
-    1. Exact match of title
-    2. Fuzzy match (remove special characters)
-    3. Keyword match for partial titles
+    1. Estimate TOC block end position to skip TOC listings
+    2. Search for titles with heading context (# prefix, line start)
+    3. Fallback to fuzzy matching if exact match fails
 
     Args:
         content: Full document content
@@ -72,6 +179,10 @@ def locate_toc_entries_in_content(content: str, toc_entries: list[dict]) -> list
         List of TOC entries with char_start and char_end populated
     """
     located_entries = []
+
+    # Estimate where TOC block ends to avoid matching TOC listings
+    toc_end_pos = _estimate_toc_end_position(content, toc_entries)
+    logger.debug(f"Estimated TOC block ends at position {toc_end_pos} (doc length: {len(content)})")
 
     for entry in toc_entries:
         title = entry.get('title', '')
@@ -83,24 +194,28 @@ def locate_toc_entries_in_content(content: str, toc_entries: list[dict]) -> list
             located_entries.append(entry.copy())
             continue
 
-        # Try exact match first
-        pattern = re.escape(title)
-        match = re.search(pattern, content, re.IGNORECASE)
+        # Search after TOC block for actual section heading
+        match = _find_title_with_heading_context(content, title, toc_end_pos)
 
         if not match:
             # Try fuzzy match: remove special characters, keep alphanumeric
             simplified_title = re.sub(r'[^\w\s]', '', title)
-            if simplified_title:
-                # Use word boundary for more accurate matching
-                pattern = re.escape(simplified_title)
-                match = re.search(pattern, content, re.IGNORECASE)
+            if simplified_title and simplified_title != title:
+                match = _find_title_with_heading_context(content, simplified_title, toc_end_pos)
 
         if not match:
             # Try matching first few significant words (for long titles)
             words = [w for w in title.split() if len(w) > 2][:4]
             if len(words) >= 2:
-                pattern = r'\b' + r'\s+'.join(re.escape(w) for w in words)
-                match = re.search(pattern, content, re.IGNORECASE)
+                partial_title = ' '.join(words)
+                match = _find_title_with_heading_context(content, partial_title, toc_end_pos)
+
+        if not match:
+            # Last resort: search entire document (including TOC area)
+            # This handles edge cases where content starts before our estimated TOC end
+            match = _find_title_with_heading_context(content, title, 0)
+            if match:
+                logger.debug(f"Found '{title[:30]}...' in TOC area (pos {match.start()}), using anyway")
 
         if match:
             located_entry = entry.copy()
@@ -618,6 +733,8 @@ def chunk_by_toc(
                     pending_merge['char_count'] = len(pending_merge['content'])
                     pending_merge['char_end'] = chunk.get('char_end', pending_merge.get('char_end'))
                     pending_merge['hierarchy_path'] += f" / {chunk['hierarchy_path']}"
+                    # Mark as merged for later content_region recomputation
+                    pending_merge['_merged'] = True
             else:
                 # Chunk is large enough
                 if pending_merge is not None:
@@ -630,9 +747,15 @@ def chunk_by_toc(
         if pending_merge is not None:
             merged_chunks.append(pending_merge)
 
-        # Renumber chapters
+        # Renumber chapters and recompute content_region for merged chunks
         for i, chunk in enumerate(merged_chunks, 1):
             chunk['chapter_num'] = i
+            # Recompute content_region for merged chunks based on new char_start/char_end
+            if chunk.get('_merged'):
+                chunk['content_region'] = assign_content_region(
+                    chunk, content_regions, total_chars
+                )
+                del chunk['_merged']  # Clean up internal flag
 
         logger.info(f"TOC chunking: {len(chunks)} initial chunks, {len(merged_chunks)} after merging small chunks")
         chunks = merged_chunks

@@ -70,7 +70,7 @@ BeanFlow-CRA 是一个基于 LLM 的 CRA 税务文档处理与智能问答系统
 
 ## Layer 2: 智能检索层
 
-**状态**: ❌ 规划中
+**状态**: ✅ MVP 已验证
 
 ### 设计目标
 
@@ -78,19 +78,27 @@ BeanFlow-CRA 是一个基于 LLM 的 CRA 税务文档处理与智能问答系统
 
 ### 核心组件
 
-| 组件 | 说明 | 参考文档 |
-|------|------|---------|
-| 意图识别 | 理解用户税务问题意图 | [13-intent-recognition-module.md](../llm-agent-prompts/phase-04-dynamic-loading/13-intent-recognition-module.md) |
-| 知识检索 | 匹配最相关的 Skill | [14-knowledge-retrieval-engine.md](../llm-agent-prompts/phase-04-dynamic-loading/14-knowledge-retrieval-engine.md) |
-| Claude 路由 | 智能 Skill 组合和注入 | [15-fastapi-chat-integration.md](../llm-agent-prompts/phase-04-dynamic-loading/15-fastapi-chat-integration.md) |
+| 组件 | 说明 | 状态 |
+|------|------|------|
+| Skill Loader | 加载和索引 Skill 文件 | ✅ 已实现 |
+| Skill Router | LLM 驱动的 Skill 路由 | ✅ 已实现 |
+| Chat Service | 基于 Skill 生成回答 | ✅ 已实现 |
 
 ### 技术方案
 
-**Skill-like 动态加载机制**:
-- 完整文档注入（不切断上下文）
-- 轻量级索引（无需向量数据库）
-- 自动 Skill 组合
-- 路由结果缓存
+**两层路由架构**:
+1. **Prefilter** (可选): 关键词/标签/触发词匹配，适用于 50+ Skills
+2. **LLM Router**: Claude Haiku 4.5 或 GLM-4-Flash 智能选择
+
+**支持的路由器**:
+| 路由器 | 模型 | 特点 |
+|--------|------|------|
+| SkillRouter | Claude Haiku 4.5 | 高准确率，推荐 |
+| SkillRouterGLM | GLM-4-Flash | 免费替代方案 |
+
+### 详细文档
+
+- [Skills 组织架构](SKILLS_ORGANIZATION.md) - Skill 目录结构和路由机制
 
 ---
 
@@ -178,11 +186,12 @@ BeanFlow-CRA/
 - [x] 缓存和断点续传
 - [x] 动态语义分类
 
-### Phase 2: 智能检索（规划中）
+### Phase 2: 智能检索（MVP 已验证）
 
-- [ ] 意图识别模块
-- [ ] Skill 路由引擎
-- [ ] 知识检索优化
+- [x] Skill Loader (目录结构支持)
+- [x] Skill Router (Claude Haiku / GLM)
+- [x] Chat Service (基于 Skill 生成回答)
+- [x] 两层路由架构设计
 
 ### Phase 3: 交互层（规划中）
 
@@ -197,6 +206,7 @@ BeanFlow-CRA/
 ### 架构文档
 
 - [Pipeline 架构](PIPELINE_ARCHITECTURE.md)
+- [Skills 组织架构](SKILLS_ORGANIZATION.md)
 - [SKILL.md 增强](SKILL_ENHANCEMENT.md)
 - [LLM Provider 系统](LLM_PROVIDERS.md)
 

@@ -24,24 +24,24 @@ class SkillRouter:
 
     def route(self, user_query: str, available_skills: List[dict]) -> Dict:
         """
-        路由用户问题到相关 Skills
+        Route user query to relevant Skills.
 
         Args:
-            user_query: 用户问题
-            available_skills: 可用的 Skills 元数据列表
+            user_query: User's question
+            available_skills: List of available Skills metadata
 
         Returns:
             {
                 "matched_skills": ["skill-id-1", "skill-id-2"],
                 "confidence": "high" | "medium" | "low",
-                "reasoning": "为什么选择这些 Skills 的推理过程"
+                "reasoning": "Reasoning for selecting these Skills"
             }
         """
-        # 可选的第一层：元数据预过滤（仅在 Skill 数量 > 50 且启用时生效）
+        # Optional first layer: metadata prefilter (only when Skills > 50 and enabled)
         if self.enable_prefilter and len(available_skills) > 50:
             original_count = len(available_skills)
             available_skills = self._prefilter_skills(user_query, available_skills)
-            print(f"✂️  预过滤: {original_count} → {len(available_skills)} 个候选 Skills")
+            print(f"✂️  Prefilter: {original_count} → {len(available_skills)} candidate Skills")
 
         prompt = self._build_routing_prompt(user_query, available_skills)
 
@@ -57,19 +57,19 @@ class SkillRouter:
             result_text = response.content[0].text
             result = self._parse_routing_result(result_text)
 
-            print(f"\n🎯 路由结果:")
-            print(f"  - 匹配 Skills: {result['matched_skills']}")
-            print(f"  - 置信度: {result['confidence']}")
-            print(f"  - 推理: {result['reasoning']}\n")
+            print(f"\n🎯 Routing Result:")
+            print(f"  - Matched Skills: {result['matched_skills']}")
+            print(f"  - Confidence: {result['confidence']}")
+            print(f"  - Reasoning: {result['reasoning']}\n")
 
             return result
 
         except Exception as e:
-            print(f"❌ 路由失败: {e}")
+            print(f"❌ Routing failed: {e}")
             return {
                 "matched_skills": [],
                 "confidence": "low",
-                "reasoning": f"路由失败: {str(e)}"
+                "reasoning": f"Routing failed: {str(e)}"
             }
 
     def _build_routing_prompt(self, user_query: str, available_skills: List[dict]) -> str:
@@ -110,9 +110,9 @@ Return only JSON, no other content."""
         return prompt
 
     def _parse_routing_result(self, result_text: str) -> Dict:
-        """解析 Claude 返回的路由结果"""
+        """Parse routing result from Claude."""
         try:
-            # 提取 JSON（可能被包裹在 ```json ... ``` 中）
+            # Extract JSON (may be wrapped in ```json ... ```)
             if "```json" in result_text:
                 json_start = result_text.find("```json") + 7
                 json_end = result_text.find("```", json_start)
@@ -126,43 +126,43 @@ Return only JSON, no other content."""
 
             result = json.loads(json_str)
 
-            # 验证必需字段
+            # Validate required fields
             if "matched_skills" not in result:
                 result["matched_skills"] = []
             if "confidence" not in result:
                 result["confidence"] = "medium"
             if "reasoning" not in result:
-                result["reasoning"] = "未提供推理"
+                result["reasoning"] = "No reasoning provided"
 
             return result
 
         except json.JSONDecodeError as e:
-            print(f"⚠️  JSON 解析失败: {e}")
-            print(f"原始输出: {result_text}")
+            print(f"⚠️  JSON parse failed: {e}")
+            print(f"Raw output: {result_text}")
             return {
                 "matched_skills": [],
                 "confidence": "low",
-                "reasoning": "解析失败"
+                "reasoning": "Parse failed"
             }
 
     def _prefilter_skills(
         self,
         user_query: str,
         all_skills: List[dict],
-        keep_ratio: float = 0.3  # 保留前 30%
+        keep_ratio: float = 0.3  # Keep top 30%
     ) -> List[dict]:
         """
-        第一层粗筛：用简单规则快速过滤
+        First layer coarse filter: quick filtering with simple rules.
 
-        只在 Skill 数量 > 50 时启用，减少 Claude API token 消耗
+        Only enabled when Skills > 50, reduces Claude API token consumption.
 
         Args:
-            user_query: 用户问题
-            all_skills: 所有可用 Skills
-            keep_ratio: 至少保留的比例（默认 30%）
+            user_query: User's question
+            all_skills: All available Skills
+            keep_ratio: Minimum ratio to keep (default 30%)
 
         Returns:
-            过滤后的 Skills 列表
+            Filtered Skills list
         """
         scored_skills = []
         query_lower = user_query.lower()
@@ -170,24 +170,24 @@ Return only JSON, no other content."""
         for skill in all_skills:
             score = 0
 
-            # 1. 检查 triggers（触发词） - 最高权重
+            # 1. Check triggers - highest weight
             triggers = skill.get('triggers', [])
             for trigger in triggers:
                 if trigger.lower() in query_lower:
                     score += 10
 
-            # 2. 检查 keywords - 高权重
+            # 2. Check keywords - high weight
             keywords = skill.get('keywords', [])
             for keyword in keywords:
                 if keyword.lower() in query_lower:
                     score += 5
 
-            # 3. 检查 domain - 中权重
+            # 3. Check domain - medium weight
             domain = skill.get('domain', '')
             if domain and domain.lower() in query_lower:
                 score += 3
 
-            # 4. 检查 tags - 低权重
+            # 4. Check tags - low weight
             tags = skill.get('tags', [])
             for tag in tags:
                 if tag.lower() in query_lower:
@@ -195,10 +195,10 @@ Return only JSON, no other content."""
 
             scored_skills.append((score, skill))
 
-        # 按分数排序
+        # Sort by score
         scored_skills.sort(reverse=True, key=lambda x: x[0])
 
-        # 保留策略：所有有得分的 + 至少保留 keep_ratio
+        # Keep strategy: all scored + at least keep_ratio
         scored_count = len([s for s in scored_skills if s[0] > 0])
         min_keep = int(len(all_skills) * keep_ratio)
         keep_count = max(scored_count, min_keep)

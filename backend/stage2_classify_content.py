@@ -230,6 +230,73 @@ def parse_analysis_response(response: str) -> dict:
     return validate_and_normalize(data)
 
 
+def safe_float(value, default: float = 0.5) -> float:
+    """
+    Safely convert a value to float, handling common LLM response formats.
+
+    Handles:
+    - Numeric types (int, float)
+    - Numeric strings ("0.85", "85")
+    - Percentage strings ("85%", "0.85%")
+    - Word values ("high", "medium", "low")
+    - Invalid values (None, empty string, etc.)
+
+    Args:
+        value: Value to convert
+        default: Default value if conversion fails
+
+    Returns:
+        Float value between 0 and 1
+    """
+    if value is None:
+        return default
+
+    # Already a number
+    if isinstance(value, (int, float)):
+        result = float(value)
+        # Normalize if > 1 (assume percentage)
+        if result > 1:
+            result = result / 100
+        return max(0.0, min(1.0, result))
+
+    # String handling
+    if isinstance(value, str):
+        value = value.strip().lower()
+
+        # Empty string
+        if not value:
+            return default
+
+        # Word values
+        word_map = {
+            'high': 0.85,
+            'medium': 0.6,
+            'med': 0.6,
+            'low': 0.3,
+            'very high': 0.95,
+            'very low': 0.15,
+            'none': 0.0,
+            'n/a': default,
+        }
+        if value in word_map:
+            return word_map[value]
+
+        # Handle percentage
+        is_percentage = '%' in value
+        value = value.replace('%', '').strip()
+
+        try:
+            result = float(value)
+            # If original had % or value > 1, treat as percentage
+            if is_percentage or result > 1:
+                result = result / 100
+            return max(0.0, min(1.0, result))
+        except ValueError:
+            return default
+
+    return default
+
+
 def get_default_analysis() -> dict:
     """返回默认分析结构"""
     return {
@@ -266,7 +333,7 @@ def validate_and_normalize(data: dict) -> dict:
     else:
         classification = {
             "primary_category": classification.get("primary_category", defaults["classification"]["primary_category"]),
-            "confidence": float(classification.get("confidence", 0.5)),
+            "confidence": safe_float(classification.get("confidence"), 0.5),
             "secondary_categories": classification.get("secondary_categories", []),
             "reasoning": classification.get("reasoning", "")
         }
@@ -320,11 +387,11 @@ def validate_and_normalize(data: dict) -> dict:
         quality = defaults["quality_assessment"]
     else:
         quality = {
-            "completeness": float(quality.get("completeness", 0.5)),
-            "accuracy": float(quality.get("accuracy", 0.5)),
-            "relevance": float(quality.get("relevance", 0.5)),
-            "clarity": float(quality.get("clarity", 0.5)),
-            "practicality": float(quality.get("practicality", 0.5))
+            "completeness": safe_float(quality.get("completeness"), 0.5),
+            "accuracy": safe_float(quality.get("accuracy"), 0.5),
+            "relevance": safe_float(quality.get("relevance"), 0.5),
+            "clarity": safe_float(quality.get("clarity"), 0.5),
+            "practicality": safe_float(quality.get("practicality"), 0.5)
         }
 
     return {

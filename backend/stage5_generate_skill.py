@@ -221,9 +221,12 @@ def generate_skill_directory(
     for enhanced_chunk in enhanced_chunks:
         reference_chunks.append({
             'content': enhanced_chunk.get('enhanced_content', ''),
-            'title': enhanced_chunk.get('original_title', f'Section {enhanced_chunk.get("chunk_id")}'),
+            'title': enhanced_chunk.get('title', f'Section {enhanced_chunk.get("chunk_id")}'),
             'slug': enhanced_chunk.get('slug', f'section-{enhanced_chunk.get("chunk_id")}'),
-            'chapter_num': enhanced_chunk.get('chunk_id', 0)
+            'chapter_num': enhanced_chunk.get('chunk_id', 0),
+            # Stage 5 优化：传递 content_region 元数据给 skill_generator
+            'content_region': enhanced_chunk.get('content_region', 'general'),
+            'toc_level': enhanced_chunk.get('toc_level', 1),
         })
 
     # Apply optimizations

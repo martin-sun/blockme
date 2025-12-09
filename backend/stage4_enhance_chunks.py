@@ -236,16 +236,76 @@ def check_cache_consistency(chunks_id: str, total_chunks: int, cache_dir: Path) 
     return results
 
 
+def get_region_context(region: str) -> str:
+    """
+    获取省份/区域的上下文说明。
+
+    Args:
+        region: 省份/区域标识符
+
+    Returns:
+        省份上下文说明字符串
+    """
+    contexts = {
+        "federal": "This content applies to all Canadian corporations filing federal T2 returns.",
+        "ontario": "This content is specific to Ontario corporations and provincial tax credits (OIDMTC, film credits, book publishing, innovation).",
+        "manitoba": "This content is specific to Manitoba corporations and provincial tax credits (manufacturing, cultural industries, R&D).",
+        "british_columbia": "This content is specific to British Columbia corporations and provincial tax incentives.",
+        "alberta": "This content is specific to Alberta corporations and provincial tax provisions.",
+        "quebec": "This content is specific to Quebec corporations and provincial tax measures.",
+        "saskatchewan": "This content is specific to Saskatchewan corporations and provincial credits.",
+        "nova_scotia": "This content is specific to Nova Scotia corporations and provincial credits.",
+        "new_brunswick": "This content is specific to New Brunswick corporations and provincial credits.",
+    }
+    return contexts.get(region, "This content applies to general Canadian tax provisions.")
+
+
+def get_region_specific_requirements(region: str) -> str:
+    """
+    获取省份特定的增强要求。
+
+    Args:
+        region: 省份/区域标识符
+
+    Returns:
+        省份特定增强要求字符串
+    """
+    if not region or region == "general":
+        return ""
+
+    requirements = {
+        "federal": """
+10. Emphasize T2 filing deadlines and requirements
+11. Highlight clean economy investment tax credits (CCUS, Clean Tech, Clean Hydrogen)
+12. Note any recent legislative changes (EIFEL, GMT, Pillar Two)""",
+
+        "ontario": """
+10. Emphasize Ontario-specific tax credits (OIDMTC, OCASE, OBPTC)
+11. Note Ontario small business deduction thresholds
+12. Highlight any Ontario-specific filing requirements""",
+
+        "manitoba": """
+10. Emphasize Manitoba-specific credits (manufacturing, book publishing, cultural industries)
+11. Note Manitoba small business threshold
+12. Highlight any Manitoba-specific compliance requirements""",
+    }
+    return requirements.get(region, "")
+
+
 def enhance_single_chunk(
     chunk_content: str,
     category: str,
     chunk_num: int,
     total_chunks: int,
     provider,
+    content_region: str = None,
+    semantic_tags: list = None,
+    chunk_title: str = None,
+    hierarchy_path: str = None,
     max_retries: int = 2
 ) -> str:
     """
-    Enhance a single chunk using LLM CLI provider.
+    Enhance a single chunk using LLM CLI provider with context-aware prompting.
 
     Args:
         chunk_content: Content to enhance
@@ -253,6 +313,10 @@ def enhance_single_chunk(
         chunk_num: Current chunk number
         total_chunks: Total number of chunks
         provider: LLM CLI provider instance
+        content_region: Province/region identifier (e.g., 'ontario', 'federal')
+        semantic_tags: List of semantic tags from Stage 2 classification
+        chunk_title: Title of the chunk
+        hierarchy_path: Document section path (string)
         max_retries: Maximum number of retry attempts
 
     Returns:
@@ -263,25 +327,57 @@ def enhance_single_chunk(
     """
     chunk_info = f" (chunk {chunk_num}/{total_chunks})" if total_chunks > 1 else ""
 
-    prompt = f"""Please enhance this CRA tax content for the '{category}' category{chunk_info}.
+    # 构建上下文信息
+    context_parts = []
 
-Requirements:
-1. Keep all factual information accurate and complete
-2. Add practical examples where appropriate
-3. Improve clarity and structure
-4. Use professional Canadian tax terminology
-5. Format as clean Markdown with proper headers (##, ###)
-6. Make it actionable for developers building tax applications
-7. IMPORTANT: Maintain at least 70% of the original content length
-8. Preserve detailed explanations and legal nuances
-9. Do not over-summarize complex tax provisions
+    if content_region and content_region != "general":
+        region_context = get_region_context(content_region)
+        context_parts.append(f"Region Focus: {region_context}")
 
-IMPORTANT: Output ONLY the enhanced Markdown content, nothing else. No meta-commentary.
+    if semantic_tags:
+        context_parts.append(f"Key Topics: {', '.join(semantic_tags[:5])}")
 
-Content to enhance:
-{chunk_content}
+    if hierarchy_path:
+        context_parts.append(f"Document Section: {hierarchy_path}")
 
-Enhanced content (Markdown only):"""
+    context_block = "\n".join(context_parts) if context_parts else ""
+
+    # 获取省份特定增强要求
+    region_requirements = get_region_specific_requirements(content_region)
+
+    prompt = f"""You are enhancing CRA tax documentation for the '{category}' category{chunk_info}.
+Your task is to PRESERVE and IMPROVE the content, not summarize it.
+
+{context_block}
+
+## Content Handling Rules:
+
+**For Table of Contents / Navigation sections:**
+- Simplify formatting (remove dots, alignment characters like "......")
+- Keep ALL entries and page references
+- Use clean Markdown list format
+
+**For Regulatory / Instructional content:**
+- PRESERVE 80%+ of original content - this is a HARD requirement
+- Keep ALL specific details: form numbers, schedule numbers, section references, deadlines, amounts
+- Keep ALL legal references and subsection numbers exactly as written (e.g., "subsection 216(4)", "section 253")
+- Add brief practical examples where helpful, but do NOT remove existing content
+
+## Formatting Requirements:
+1. Use clean Markdown with proper headers (##, ###)
+2. Use professional Canadian tax terminology
+3. Make it actionable for developers building tax applications
+4. Improve clarity and structure without losing information{region_requirements}
+
+## DO NOT:
+- Summarize or condense regulatory content
+- Remove "redundant" information (users need comprehensive reference material)
+- Skip any form numbers, schedule numbers, or line references
+- Add meta-commentary or explanations about what you did
+
+Output ONLY the enhanced Markdown content:
+
+{chunk_content}"""
 
     last_error = None
 
@@ -361,10 +457,12 @@ def process_chunk_worker(
     total_chunks: int,
     provider_name: str,
     chunks_id: str,
-    cache_dir: Path
+    cache_dir: Path,
+    semantic_tags: list = None
 ) -> Tuple[int, bool, str, float]:
     """
     Worker function to process a single chunk in a subprocess.
+    Now preserves metadata from Stage 3.
 
     Args:
         chunk_num: Chunk number (1-indexed)
@@ -374,6 +472,7 @@ def process_chunk_worker(
         provider_name: LLM provider name
         chunks_id: Chunks cache ID
         cache_dir: Cache directory path
+        semantic_tags: List of semantic tags from Stage 2 classification
 
     Returns:
         Tuple of (chunk_num, success, message, processing_time)
@@ -389,6 +488,15 @@ def process_chunk_worker(
         logger.debug(f"  - Category: {category}")
         logger.debug(f"  - Content length: {chunk_data.get('char_count', 'unknown')}")
 
+        # 从 chunk_data 提取元数据
+        content_region = chunk_data.get('content_region', 'general')
+        chunk_title = chunk_data.get('title', '')
+        hierarchy_path = chunk_data.get('hierarchy_path', '')  # string 类型
+        toc_level = chunk_data.get('toc_level', 1)
+
+        logger.debug(f"  - Content region: {content_region}")
+        logger.debug(f"  - Hierarchy path: {hierarchy_path}")
+
         # Initialize provider in this subprocess
         # Enable thinking mode for GLM API to improve content quality
         enable_thinking = (provider_name.lower() == 'glm-api')
@@ -402,13 +510,17 @@ def process_chunk_worker(
 
         logger.debug(f"Provider '{provider_name}' initialized successfully")
 
-        # Enhance the chunk
+        # Enhance the chunk (传入上下文)
         enhanced_content = enhance_single_chunk(
             chunk_data['content'],
             category,
             chunk_num,
             total_chunks,
-            provider
+            provider,
+            content_region=content_region,
+            semantic_tags=semantic_tags,
+            chunk_title=chunk_title,
+            hierarchy_path=hierarchy_path
         )
 
         logger.debug(f"Enhancement completed for chunk {chunk_num}")
@@ -448,7 +560,15 @@ def process_chunk_worker(
             "original_char_count": chunk_data.get('char_count', 0),
             "enhanced_char_count": len(enhanced_content),
             "enhanced_at": datetime.now().isoformat(),
-            "provider": provider_name
+            "provider": provider_name,
+            # 保留 Stage 3 元数据
+            "content_region": content_region,
+            "toc_level": toc_level,
+            "hierarchy_path": hierarchy_path,
+            "parent_title": chunk_data.get('parent_title', ''),
+            "chunking_method": chunk_data.get('chunking_method', ''),
+            "char_start": chunk_data.get('char_start'),
+            "char_end": chunk_data.get('char_end')
         }
 
         with open(chunk_file, 'w', encoding='utf-8') as f:
@@ -539,6 +659,11 @@ def enhance_chunks(
 
     category = classification_data.get("primary_category", "unknown")
     print(f"Category: {category}")
+
+    # 提取 semantic_tags 供 prompt 使用
+    semantic_tags = classification_data.get("semantic_tags", [])
+    if semantic_tags:
+        print(f"Semantic tags: {', '.join(semantic_tags[:5])}")
 
     # Perform cache consistency check
     consistency_results = check_cache_consistency(chunks_id, total_chunks, cache_dir or Path('cache'))
@@ -699,7 +824,8 @@ def enhance_chunks(
                     total_chunks,
                     provider_name,
                     chunks_id,
-                    cache_dir or Path('cache')
+                    cache_dir or Path('cache'),
+                    semantic_tags  # 传递 semantic_tags
                 )
                 future_to_chunk[future] = chunk_num
                 active_chunks.add(chunk_num)
@@ -777,7 +903,8 @@ def enhance_chunks(
                 total_chunks,
                 provider_name,
                 chunks_id,
-                cache_dir or Path('cache')
+                cache_dir or Path('cache'),
+                semantic_tags  # 传递 semantic_tags
             )
 
             completed_count += 1
@@ -873,7 +1000,7 @@ Examples:
     parser.add_argument(
         '--provider',
         type=str,
-        choices=['claude', 'gemini', 'codex', 'glm-api'],
+        choices=['claude', 'gemini', 'gemini-api', 'codex', 'glm-api'],
         help='LLM provider to use (required unless --resume)'
     )
 

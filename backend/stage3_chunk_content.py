@@ -47,9 +47,180 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Claude Sonnet 4.5 specs: 200K token input, 64K token output
-# Using 300K chars (75K tokens) for optimal chunking
-MAX_CHUNK_SIZE = 300_000
+# Claude Skills best practices: smaller chunks for better organization
+# 30K chars (~500 lines) per chunk for optimal skill file generation
+MAX_CHUNK_SIZE = 30_000
+
+
+def locate_toc_entries_in_content(content: str, toc_entries: list[dict]) -> list[dict]:
+    """
+    Locate TOC entries in document content by searching for titles.
+
+    Stage 2's TOC only has page_number, not char_start.
+    This function searches for title text to determine character positions.
+
+    Search strategy:
+    1. Exact match of title
+    2. Fuzzy match (remove special characters)
+    3. Keyword match for partial titles
+
+    Args:
+        content: Full document content
+        toc_entries: List of TOC entries from Stage 2
+
+    Returns:
+        List of TOC entries with char_start and char_end populated
+    """
+    located_entries = []
+
+    for entry in toc_entries:
+        title = entry.get('title', '')
+        if not title:
+            continue
+
+        # Skip if already has char_start
+        if entry.get('char_start') is not None:
+            located_entries.append(entry.copy())
+            continue
+
+        # Try exact match first
+        pattern = re.escape(title)
+        match = re.search(pattern, content, re.IGNORECASE)
+
+        if not match:
+            # Try fuzzy match: remove special characters, keep alphanumeric
+            simplified_title = re.sub(r'[^\w\s]', '', title)
+            if simplified_title:
+                # Use word boundary for more accurate matching
+                pattern = re.escape(simplified_title)
+                match = re.search(pattern, content, re.IGNORECASE)
+
+        if not match:
+            # Try matching first few significant words (for long titles)
+            words = [w for w in title.split() if len(w) > 2][:4]
+            if len(words) >= 2:
+                pattern = r'\b' + r'\s+'.join(re.escape(w) for w in words)
+                match = re.search(pattern, content, re.IGNORECASE)
+
+        if match:
+            located_entry = entry.copy()
+            located_entry['char_start'] = match.start()
+            located_entries.append(located_entry)
+        else:
+            logger.warning(f"Could not locate TOC entry: {title[:50]}")
+
+    # Sort by position
+    located_entries.sort(key=lambda x: x.get('char_start', 0))
+
+    # Calculate char_end (next entry's char_start)
+    for i, entry in enumerate(located_entries):
+        if i + 1 < len(located_entries):
+            entry['char_end'] = located_entries[i + 1]['char_start']
+        else:
+            entry['char_end'] = len(content)
+
+    logger.info(f"Located {len(located_entries)} of {len(toc_entries)} TOC entries in content")
+    return located_entries
+
+
+def assign_content_region(chunk: dict, content_regions: list[dict], total_chars: int) -> str:
+    """
+    Assign content_region to a chunk based on its position in the document.
+
+    Uses content_regions' estimated_start_percent/estimated_end_percent
+    to determine which region a chunk belongs to.
+
+    Args:
+        chunk: Chunk dict with char_start
+        content_regions: List of content regions from Stage 2
+        total_chars: Total document character count
+
+    Returns:
+        Region name (e.g., "federal", "ontario", "manitoba")
+    """
+    if not content_regions:
+        return "general"
+
+    chunk_start = chunk.get('char_start', 0)
+    chunk_percent = (chunk_start / total_chars) * 100 if total_chars > 0 else 0
+
+    for region in content_regions:
+        start_pct = region.get('estimated_start_percent', 0)
+        end_pct = region.get('estimated_end_percent', 100)
+
+        if start_pct <= chunk_percent <= end_pct:
+            return region.get('region', 'general')
+
+    return "general"
+
+
+def split_large_chunk_by_headings(
+    content: str,
+    max_size: int,
+    base_title: str = "",
+    char_offset: int = 0
+) -> list[dict]:
+    """
+    Split a large chunk by ## headings into smaller chunks.
+
+    Used to process large chunks (like chunk-080) that contain multiple ## headings.
+
+    Args:
+        content: Chunk content to split
+        max_size: Maximum chunk size in characters
+        base_title: Base title for sub-chunks (used in part naming)
+        char_offset: Character offset in original document
+
+    Returns:
+        List of sub-chunk dicts
+    """
+    # Find all ## and ### headings
+    heading_pattern = re.compile(r'^(#{2,3})\s+(.+)$', re.MULTILINE)
+    headings = list(heading_pattern.finditer(content))
+
+    if not headings:
+        # No ## headings, split by paragraphs
+        sub_contents = split_content_into_chunks(content, max_size)
+        return [{
+            'content': sub_content,
+            'title': f"{base_title} (Part {j+1})" if base_title else f"Section Part {j+1}",
+            'slug': _slugify(f"{base_title}-part-{j+1}" if base_title else f"section-part-{j+1}"),
+            'char_count': len(sub_content),
+            'char_start': char_offset,  # Approximate
+            'char_end': char_offset + len(sub_content)
+        } for j, sub_content in enumerate(sub_contents)]
+
+    chunks = []
+    for i, match in enumerate(headings):
+        start_pos = match.start()
+        end_pos = headings[i + 1].start() if i + 1 < len(headings) else len(content)
+
+        section_content = content[start_pos:end_pos].strip()
+        section_title = match.group(2).strip()
+
+        # If single section is still too large, recursively split
+        if len(section_content) > max_size:
+            sub_contents = split_content_into_chunks(section_content, max_size)
+            for j, sub_content in enumerate(sub_contents):
+                chunks.append({
+                    'content': sub_content,
+                    'title': f"{section_title} (Part {j+1})",
+                    'slug': _slugify(f"{section_title}-part-{j+1}"),
+                    'char_count': len(sub_content),
+                    'char_start': char_offset + start_pos,
+                    'char_end': char_offset + start_pos + len(sub_content)
+                })
+        else:
+            chunks.append({
+                'content': section_content,
+                'title': section_title,
+                'slug': _slugify(section_title),
+                'char_count': len(section_content),
+                'char_start': char_offset + start_pos,
+                'char_end': char_offset + end_pos
+            })
+
+    return chunks
 
 
 def clean_content(content: str) -> str:
@@ -311,39 +482,50 @@ def split_by_chapters(content: str, max_chunk_size: int) -> list[dict]:
 def chunk_by_toc(
     content: str,
     toc_entries: list[dict],
+    content_regions: list[dict] = None,
     max_level: int = 2,
-    min_chunk_size: int = 10000
+    min_chunk_size: int = 2000,
+    max_chunk_size: int = MAX_CHUNK_SIZE
 ) -> list[dict]:
     """
     Chunk content based on TOC entries with hierarchy support.
 
     Strategy:
+    - First locate TOC entries in content (calculate char_start)
     - Use TOC entries with level <= max_level as chunk boundaries
-    - Filter out chunks smaller than min_chunk_size
+    - Split large chunks by ## headings
     - Merge adjacent small chunks
+    - Assign content_region to each chunk
     - Add hierarchy path information (e.g., "Chapter 3 > Section 3.1")
 
     Args:
         content: Full document content
         toc_entries: List of TOC entries from Stage 2
+        content_regions: List of content regions from Stage 2 (for province tagging)
         max_level: Maximum level to use for chunking (default: 2)
-        min_chunk_size: Minimum chunk size in characters (default: 10000)
+        min_chunk_size: Minimum chunk size in characters (default: 2000)
+        max_chunk_size: Maximum chunk size in characters (default: MAX_CHUNK_SIZE)
 
     Returns:
-        List of chunk dicts with hierarchy metadata
+        List of chunk dicts with hierarchy metadata and content_region
     """
     chunks = []
+    total_chars = len(content)
 
-    # Filter TOC entries by max_level and sort by char_start
+    # Step 1: Locate TOC entries in content (calculate char_start)
+    located_entries = locate_toc_entries_in_content(content, toc_entries)
+
+    # Filter by max_level
     valid_entries = [
-        entry for entry in toc_entries
-        if entry.get('level', 1) <= max_level and entry.get('char_start') is not None
+        entry for entry in located_entries
+        if entry.get('level', 1) <= max_level
     ]
-    valid_entries.sort(key=lambda x: x.get('char_start', 0))
 
     if not valid_entries:
         logger.warning("No valid TOC entries found for chunking")
         return []
+
+    logger.info(f"Processing {len(valid_entries)} TOC entries (max_level={max_level})")
 
     # Build hierarchy paths
     # Track parent titles at each level
@@ -353,7 +535,7 @@ def chunk_by_toc(
         level = entry.get('level', 1)
         title = entry.get('title', f'Section {i+1}')
         char_start = entry.get('char_start', 0)
-        char_end = entry.get('char_end')
+        char_end = entry.get('char_end', len(content))
 
         # Update level stack (remove deeper levels)
         level_stack = {k: v for k, v in level_stack.items() if k < level}
@@ -373,35 +555,53 @@ def chunk_by_toc(
                     break
                 parent_level -= 1
 
-        # Determine end position
-        if char_end is not None:
-            end_pos = char_end
-        elif i + 1 < len(valid_entries):
-            end_pos = valid_entries[i + 1].get('char_start', len(content))
-        else:
-            end_pos = len(content)
-
         # Extract content
-        chunk_content = content[char_start:end_pos].strip()
+        chunk_content = content[char_start:char_end].strip()
 
         if not chunk_content:
             continue
 
-        chunks.append({
-            'content': chunk_content,
-            'title': title,
-            'slug': _slugify(title),
-            'chapter_num': len(chunks) + 1,
-            'char_count': len(chunk_content),
-            'toc_level': level,
-            'hierarchy_path': hierarchy_path,
-            'parent_title': parent_title,
-            'chunking_method': 'toc',
-            'char_start': char_start,
-            'char_end': end_pos
-        })
+        # Step 2: Split large chunks by ## headings
+        if len(chunk_content) > max_chunk_size:
+            logger.info(f"Splitting large chunk '{title[:30]}...' ({len(chunk_content):,} chars) by headings")
+            sub_chunks = split_large_chunk_by_headings(
+                chunk_content,
+                max_chunk_size,
+                base_title=title,
+                char_offset=char_start
+            )
+            for sub_chunk in sub_chunks:
+                # Assign content region
+                sub_chunk['content_region'] = assign_content_region(
+                    sub_chunk, content_regions, total_chars
+                )
+                sub_chunk['toc_level'] = level
+                sub_chunk['hierarchy_path'] = hierarchy_path
+                sub_chunk['parent_title'] = parent_title
+                sub_chunk['chunking_method'] = 'toc'
+                sub_chunk['chapter_num'] = len(chunks) + 1
+                chunks.append(sub_chunk)
+        else:
+            chunk = {
+                'content': chunk_content,
+                'title': title,
+                'slug': _slugify(title),
+                'chapter_num': len(chunks) + 1,
+                'char_count': len(chunk_content),
+                'toc_level': level,
+                'hierarchy_path': hierarchy_path,
+                'parent_title': parent_title,
+                'chunking_method': 'toc',
+                'char_start': char_start,
+                'char_end': char_end
+            }
+            # Assign content region
+            chunk['content_region'] = assign_content_region(
+                chunk, content_regions, total_chars
+            )
+            chunks.append(chunk)
 
-    # Merge small chunks
+    # Step 3: Merge small chunks
     if min_chunk_size > 0:
         merged_chunks = []
         pending_merge = None
@@ -416,7 +616,7 @@ def chunk_by_toc(
                     pending_merge['title'] += f" + {chunk['title']}"
                     pending_merge['slug'] = _slugify(pending_merge['title'])
                     pending_merge['char_count'] = len(pending_merge['content'])
-                    pending_merge['char_end'] = chunk['char_end']
+                    pending_merge['char_end'] = chunk.get('char_end', pending_merge.get('char_end'))
                     pending_merge['hierarchy_path'] += f" / {chunk['hierarchy_path']}"
             else:
                 # Chunk is large enough
@@ -494,20 +694,34 @@ def chunk_content(
     cleaned_content = clean_content(total_text)
     print(f"   Cleaned: {len(cleaned_content):,} chars")
 
-    # Load classification data (contains TOC from Stage 2)
+    # Load classification data (contains TOC and content_regions from Stage 2)
     classification_data = None
     toc_data = None
+    content_regions = None
     chunking_strategy = "pattern_matching"
 
     if use_semantic:
         classification_data = cache_mgr.load_cache(PipelineStage.CLASSIFICATION, extraction_id)
-        if classification_data and 'toc' in classification_data:
-            toc_data = classification_data['toc']
-            if toc_data.get('has_toc') and toc_data.get('entries'):
-                print(f"\n📋 Found TOC from Stage 2")
-                print(f"   Source: {toc_data.get('source', 'unknown')}")
-                print(f"   Max level: {toc_data.get('max_level', 'unknown')}")
-                print(f"   TOC entries: {len(toc_data['entries'])}")
+        if classification_data:
+            # Load TOC
+            if 'toc' in classification_data:
+                toc_data = classification_data['toc']
+                if toc_data.get('has_toc') and toc_data.get('entries'):
+                    print(f"\n📋 Found TOC from Stage 2")
+                    print(f"   Source: {toc_data.get('source', 'unknown')}")
+                    print(f"   Max level: {toc_data.get('max_level', 'unknown')}")
+                    print(f"   TOC entries: {len(toc_data['entries'])}")
+
+            # Load content_regions
+            content_regions = classification_data.get('content_regions', [])
+            if content_regions:
+                print(f"\n🗺️  Found {len(content_regions)} content regions from Stage 2")
+                for region in content_regions:
+                    region_name = region.get('region', 'unknown')
+                    region_title = region.get('title', '')
+                    start_pct = region.get('estimated_start_percent', 0)
+                    end_pct = region.get('estimated_end_percent', 100)
+                    print(f"   - {region_name}: {region_title} ({start_pct}%-{end_pct}%)")
 
     # Split into chunks
     if toc_data and toc_data.get('has_toc') and toc_data.get('entries'):
@@ -515,8 +729,10 @@ def chunk_content(
         chunks = chunk_by_toc(
             cleaned_content,
             toc_data['entries'],
+            content_regions=content_regions,
             max_level=2,
-            min_chunk_size=10000
+            min_chunk_size=2000,
+            max_chunk_size=max_chunk_size
         )
         chunking_strategy = "toc_based"
 
@@ -558,8 +774,19 @@ def chunk_content(
     print(f"\n✅ Chunking complete!")
     print(f"   Strategy: {chunking_strategy}")
     print(f"   Total chunks: {len(chunks)}")
-    print(f"   Avg chunk size: {len(cleaned_content) // len(chunks):,} chars")
+    sizes = [c['char_count'] for c in chunks]
+    print(f"   Chunk sizes: min={min(sizes):,}, max={max(sizes):,}, avg={sum(sizes)//len(sizes):,} chars")
     print(f"   Cache: {cache_path}")
+
+    # Show content region distribution
+    if any(c.get('content_region') for c in chunks):
+        region_counts = {}
+        for c in chunks:
+            r = c.get('content_region', 'unknown')
+            region_counts[r] = region_counts.get(r, 0) + 1
+        print(f"\n🗺️  Content Region Distribution:")
+        for region, count in sorted(region_counts.items()):
+            print(f"   - {region}: {count} chunks")
 
     # Show chunk summary
     print(f"\n📊 Chunk Summary:")
@@ -567,9 +794,10 @@ def chunk_content(
         hierarchy_info = ""
         if 'toc_level' in chunk:
             hierarchy_info = f" [L{chunk['toc_level']}]"
-            if chunk.get('hierarchy_path'):
-                hierarchy_info += f" {chunk['hierarchy_path'][:60]}"
-        print(f"   {i}. {chunk['title'][:40]:<40} ({chunk['char_count']:>8,} chars){hierarchy_info}")
+        region_info = ""
+        if chunk.get('content_region'):
+            region_info = f" [{chunk['content_region']}]"
+        print(f"   {i}. {chunk['title'][:35]:<35} ({chunk['char_count']:>8,} chars){hierarchy_info}{region_info}")
     if len(chunks) > 5:
         print(f"   ... and {len(chunks) - 5} more")
 

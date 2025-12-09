@@ -185,14 +185,22 @@ class SkillGenerator:
           - SKILL.md (lightweight index)
           - references/
             - index.md (navigation)
-            - {chunk-slug}.md (enhanced content)
+            - federal/ (region subdirectory)
+              - index.md
+              - {chunk-slug}.md
+            - ontario/ (region subdirectory)
+              - index.md
+              - {chunk-slug}.md
+            - general/ (region subdirectory)
+              - index.md
+              - {chunk-slug}.md
           - raw/
             - full-extract.txt (original text)
 
         Args:
             skill_id: Skill identifier
             raw_text: Original extracted text
-            reference_chunks: List of enhanced chunks with metadata
+            reference_chunks: List of enhanced chunks with metadata (including content_region)
             metadata: Skill metadata
             subdirectory: Optional parent subdirectory
 
@@ -214,30 +222,51 @@ class SkillGenerator:
         # 1. Save raw text
         self._save_raw_text(skill_dir / "raw" / "full-extract.txt", raw_text)
 
-        # 2. Save reference chunks
-        reference_files = []
-        for chunk in reference_chunks:
-            ref_path = self._save_reference_file(
-                skill_dir / "references",
-                chunk['slug'],
-                chunk['title'],
-                chunk['content'],
-                chunk['chapter_num']
-            )
-            reference_files.append({
-                'path': ref_path.name,
-                'title': chunk['title'],
-                'chapter_num': chunk['chapter_num']
-            })
+        # 2. Group chunks by region
+        chunks_by_region = self._group_chunks_by_region(reference_chunks)
 
-        # 3. Generate references/index.md
+        # 3. Save reference chunks organized by region
+        reference_files = []
+        for region, chunks in chunks_by_region.items():
+            # Create region subdirectory
+            region_dir = skill_dir / "references" / region
+            region_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save chunks in this region
+            region_files = []
+            for chunk in chunks:
+                ref_path = self._save_reference_file(
+                    region_dir,
+                    chunk['slug'],
+                    chunk['title'],
+                    chunk['content'],
+                    chunk['chapter_num']
+                )
+                file_info = {
+                    'path': f"{region}/{ref_path.name}",
+                    'title': chunk['title'],
+                    'chapter_num': chunk['chapter_num'],
+                    'region': region
+                }
+                region_files.append(file_info)
+                reference_files.append(file_info)
+
+            # Create region index
+            self._create_region_index(
+                region_dir / "index.md",
+                region,
+                region_files,
+                metadata
+            )
+
+        # 4. Generate references/index.md (total index grouped by region)
         self._create_reference_index(
             skill_dir / "references" / "index.md",
             reference_files,
             metadata
         )
 
-        # 4. Generate SKILL.md
+        # 5. Generate SKILL.md (grouped by region)
         self._create_skill_index(
             skill_dir / "SKILL.md",
             metadata,
@@ -281,13 +310,75 @@ class SkillGenerator:
         logger.info(f"Reference file saved: {file_path}")
         return file_path
 
+    def _get_region_display_name(self, region: str) -> str:
+        """Get display name for a region."""
+        region_titles = {
+            'federal': 'Federal Tax (T2 Return)',
+            'ontario': 'Ontario Tax Credits',
+            'manitoba': 'Manitoba Tax Credits',
+            'british_columbia': 'British Columbia Tax Credits',
+            'alberta': 'Alberta Tax Credits',
+            'quebec': 'Quebec Tax Credits',
+            'saskatchewan': 'Saskatchewan Tax Credits',
+            'nova_scotia': 'Nova Scotia Tax Credits',
+            'new_brunswick': 'New Brunswick Tax Credits',
+            'pei': 'PEI Tax Credits',
+            'newfoundland': 'Newfoundland Tax Credits',
+            'yukon': 'Yukon Tax Credits',
+            'northwest_territories': 'Northwest Territories Tax Credits',
+            'nunavut': 'Nunavut Tax Credits',
+            'general': 'General Information'
+        }
+        return region_titles.get(region, region.replace('_', ' ').title())
+
+    def _create_region_index(
+        self,
+        index_path: Path,
+        region: str,
+        region_files: List[dict],
+        metadata: SkillMetadata
+    ) -> None:
+        """Create index.md for a specific region subdirectory."""
+        region_title = self._get_region_display_name(region)
+
+        content = f"""# {region_title}
+
+**Parent Skill:** {metadata.title}
+**Region:** {region}
+**Total Files:** {len(region_files)}
+
+---
+
+## Contents
+
+"""
+
+        # Add table of contents for this region
+        for ref in sorted(region_files, key=lambda x: x['chapter_num']):
+            # Extract just the filename from the path
+            filename = ref['path'].split('/')[-1]
+            content += f"- [{ref['title']}]({filename})\n"
+
+        content += f"""
+---
+
+**Navigation:**
+- Return to [Reference Index](../index.md)
+- Return to [SKILL.md](../../SKILL.md)
+"""
+
+        with open(index_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        logger.info(f"Region index created: {index_path}")
+
     def _create_reference_index(
         self,
         index_path: Path,
         reference_files: List[dict],
         metadata: SkillMetadata
     ) -> None:
-        """Create references/index.md navigation file."""
+        """Create references/index.md navigation file (grouped by region)."""
         content = f"""# {metadata.title} - Reference Index
 
 **Source:** {metadata.source}
@@ -298,13 +389,26 @@ class SkillGenerator:
 
 ## Available References
 
-This documentation is organized into the following sections:
+This documentation is organized by jurisdiction/region:
 
 """
 
-        # Add table of contents
-        for ref in sorted(reference_files, key=lambda x: x['chapter_num']):
-            content += f"{ref['chapter_num']}. **[{ref['title']}]({ref['path']})** \n"
+        # Group files by region for display
+        files_by_region: Dict[str, List[dict]] = {}
+        for ref in reference_files:
+            region = ref.get('region', 'general')
+            if region not in files_by_region:
+                files_by_region[region] = []
+            files_by_region[region].append(ref)
+
+        # Display grouped by region
+        for region, files in files_by_region.items():
+            region_title = self._get_region_display_name(region)
+            content += f"\n### {region_title}\n\n"
+            content += f"**[View {region_title} Index]({region}/index.md)** ({len(files)} files)\n\n"
+
+            for ref in sorted(files, key=lambda x: x['chapter_num']):
+                content += f"- [{ref['title']}]({ref['path']})\n"
 
         content += f"""
 ---
@@ -328,7 +432,7 @@ This documentation is organized into the following sections:
         reference_files: List[dict],
         raw_text_size: int
     ) -> None:
-        """Create SKILL.md lightweight index file."""
+        """Create SKILL.md lightweight index file (grouped by region)."""
         # Generate YAML front matter
         yaml_content = yaml.dump(
             metadata.model_dump(exclude_none=True),
@@ -355,13 +459,46 @@ Use this skill when you need information about:
 
 ## Reference Documentation
 
-This skill contains {len(reference_files)} reference chapters:
+This skill contains {len(reference_files)} reference chapters organized by jurisdiction:
 
 """
 
-        # Add compact table of contents
-        for ref in sorted(reference_files, key=lambda x: x['chapter_num']):
-            content += f"{ref['chapter_num']}. [{ref['title']}](references/{ref['path']})\n"
+        # Group files by region for display
+        files_by_region: Dict[str, List[dict]] = {}
+        for ref in reference_files:
+            region = ref.get('region', 'general')
+            if region not in files_by_region:
+                files_by_region[region] = []
+            files_by_region[region].append(ref)
+
+        # Display grouped by region (using _group_chunks_by_region order)
+        region_order = [
+            'federal',
+            'alberta', 'british_columbia', 'manitoba', 'new_brunswick',
+            'newfoundland', 'nova_scotia', 'ontario', 'pei',
+            'quebec', 'saskatchewan',
+            'yukon', 'northwest_territories', 'nunavut',
+            'general'
+        ]
+
+        # Process regions in order
+        for region in region_order:
+            if region in files_by_region:
+                files = files_by_region[region]
+                region_title = self._get_region_display_name(region)
+                content += f"\n### {region_title}\n\n"
+
+                for ref in sorted(files, key=lambda x: x['chapter_num']):
+                    content += f"- [{ref['title']}](references/{ref['path']})\n"
+
+        # Handle any regions not in the predefined order
+        for region, files in files_by_region.items():
+            if region not in region_order:
+                region_title = self._get_region_display_name(region)
+                content += f"\n### {region_title}\n\n"
+
+                for ref in sorted(files, key=lambda x: x['chapter_num']):
+                    content += f"- [{ref['title']}](references/{ref['path']})\n"
 
         content += f"""
 **[View Full Index](references/index.md)** | **[Raw Text](raw/full-extract.txt)** ({raw_text_size:,} chars)
@@ -390,6 +527,52 @@ This skill contains {len(reference_files)} reference chapters:
             f.write(content)
 
         logger.info(f"SKILL.md index created: {skill_path}")
+
+    def _group_chunks_by_region(self, reference_chunks: List[dict]) -> Dict[str, List[dict]]:
+        """
+        按 content_region 分组 chunks。
+
+        如果没有 content_region，默认归类到 'general'。
+        排序优先级：federal > 各省份按字母序 > general
+
+        Args:
+            reference_chunks: List of chunks with content_region field
+
+        Returns:
+            Dict mapping region name to list of chunks
+        """
+        groups: Dict[str, List[dict]] = {}
+        for chunk in reference_chunks:
+            region = chunk.get('content_region', 'general')
+            if not region:
+                region = 'general'
+            if region not in groups:
+                groups[region] = []
+            groups[region].append(chunk)
+
+        # 按优先级排序 regions: federal 优先，然后各省份按字母序，general 最后
+        region_order = [
+            'federal',
+            'alberta', 'british_columbia', 'manitoba', 'new_brunswick',
+            'newfoundland', 'nova_scotia', 'ontario', 'pei',
+            'quebec', 'saskatchewan',
+            'yukon', 'northwest_territories', 'nunavut',
+            'general'
+        ]
+
+        sorted_groups: Dict[str, List[dict]] = {}
+
+        # 先按预定义顺序添加
+        for region in region_order:
+            if region in groups:
+                sorted_groups[region] = groups[region]
+
+        # 添加其他未列出的 regions（按字母序）
+        for region in sorted(groups.keys()):
+            if region not in sorted_groups:
+                sorted_groups[region] = groups[region]
+
+        return sorted_groups
 
     def _deduplicate_content_chunks(self, reference_chunks):
         """Remove duplicate or similar content chunks."""

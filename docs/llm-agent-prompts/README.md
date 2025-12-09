@@ -1,22 +1,31 @@
 # LLM Code Agent 提示词文档集
 
-这是一套完整的提示词文档，用于指导 LLM Code Agent 实现 **Svelte 前端 + FastAPI 后端 + Claude/GLM API + 动态知识加载系统**。
+这是一套用于指导 LLM Code Agent 实现 BeanFlow-CRA 系统的提示词文档。
 
-## 📋 项目概述
+---
 
-**目标**：搭建一个基于 Svelte 的专业知识库对话系统，通过上传专业领域文档生成 Markdown 知识库，并实现类似 Claude Skill 的动态知识加载机制。
+## 系统分层架构
 
-**核心特性**：
-- ✅ 支持 PDF/Word/Excel/PPT 等多种文档格式
-- ✅ 使用 Claude/GLM 多模态 API 提取文档内容
-- ✅ 自动生成结构化 Markdown 知识库
-- ✅ Skill-like 动态知识加载机制（类似 Claude Code Skill）
-- ✅ Claude 辅助的智能 Skill 路由
-- ✅ 轻量级索引（无需向量数据库）
-- ✅ 成本优化策略（缓存、智能路由）
-- ✅ 自定义 Svelte 前端界面和工作流
+BeanFlow-CRA 采用三层架构设计：
 
-## 📂 文档结构
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 3: 交互层 (❌ 未实现)                                 │
+│  - Svelte 前端界面 + FastAPI 聊天接口                       │
+├─────────────────────────────────────────────────────────────┤
+│  Layer 2: 智能检索层 (❌ 未实现)                             │
+│  - 意图识别 + Skill 路由 + 知识检索                         │
+├─────────────────────────────────────────────────────────────┤
+│  Layer 1: 知识库生成层 (✅ 已完成 95%)                       │
+│  - 6 阶段 Pipeline + 多 LLM Provider                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**详细架构文档**: [SYSTEM_ARCHITECTURE.md](../architecture/SYSTEM_ARCHITECTURE.md)
+
+---
+
+## 文档结构
 
 ```
 docs/llm-agent-prompts/
@@ -26,228 +35,113 @@ docs/llm-agent-prompts/
 │   ├── 02-configure-claude-api.md
 │   ├── 03-configure-glm-api.md
 │   └── 04-setup-python-dependencies.md
-├── phase-02-document-processing/      # 阶段2：文档处理（5个文档）
-│   ├── 05-pdf-to-image-converter.md
-│   ├── 06-office-document-converter.md
-│   ├── 07-claude-vision-integration.md
-│   ├── 08-glm-vision-integration.md
-│   └── 09-markdown-generation-optimizer.md
-├── phase-03-knowledge-management/     # 阶段3：知识库管理（3个文档）
-│   ├── 10-knowledge-collection-design.md
-│   ├── 11-markdown-storage-indexing.md
-│   └── 12-document-metadata-manager.md
-├── phase-04-dynamic-loading/          # 阶段4：动态加载引擎（3个文档）
+├── phase-02-document-processing/      # 阶段2：文档处理（4个文档）
+│   ├── 06-office-document-converter.md   # 未来功能
+│   ├── 07-claude-vision-integration.md   # Vision 参考
+│   ├── 08-glm-vision-integration.md      # Vision 参考
+│   └── 10-backend-structure.md           # 后端架构
+├── phase-04-dynamic-loading/          # 阶段4：动态加载引擎（3个文档）- Layer 2
 │   ├── 13-intent-recognition-module.md
 │   ├── 14-knowledge-retrieval-engine.md
 │   └── 15-fastapi-chat-integration.md
-└── phase-05-testing-optimization/     # 阶段5：测试优化（3个文档）
+└── phase-05-testing-optimization/     # 阶段5：测试优化（2个文档）
     ├── 16-document-processing-tests.md
-    ├── 17-cost-optimization-strategies.md
     └── 18-svelte-frontend-development.md
 ```
 
-## 🚀 使用指南
+---
 
-### 1. 按阶段顺序执行
+## Layer 状态说明
 
-建议按照以下顺序完成开发：
+### Layer 1: 知识库生成层 ✅ 已完成
 
-#### **阶段1：环境搭建（1-2天）**
+Layer 1 的核心功能已在 Pipeline 中实现，相关规划文档已归档。
+
+**实现文档**:
+- [Pipeline 架构](../architecture/PIPELINE_ARCHITECTURE.md) - 6 阶段流水线
+- [SKILL.md 增强](../architecture/SKILL_ENHANCEMENT.md) - Skill 增强功能
+- [LLM Provider 系统](../architecture/LLM_PROVIDERS.md) - 多 Provider 支持
+
+### Layer 2: 智能检索层 (规划中)
+
+本目录的 `phase-04-dynamic-loading/` 文档描述 Layer 2 的规划：
+- 意图识别模块
+- 知识检索引擎
+- FastAPI 聊天集成
+
+### Layer 3: 交互层 (规划中)
+
+本目录的 `phase-05-testing-optimization/18-svelte-frontend-development.md` 描述前端规划。
+
+---
+
+## 使用指南
+
+### 按阶段顺序执行
+
+#### 阶段1：环境搭建
+
 1. [01 - 搭建 Svelte 前端环境](./phase-01-environment/01-setup-svelte-frontend.md)
 2. [02 - 配置 Claude API](./phase-01-environment/02-configure-claude-api.md)
 3. [03 - 配置 GLM API](./phase-01-environment/03-configure-glm-api.md)
 4. [04 - 安装 Python 依赖](./phase-01-environment/04-setup-python-dependencies.md)
 
-#### **阶段2：文档处理（3-5天）**
-5. [05 - PDF 转图像模块](./phase-02-document-processing/05-pdf-to-image-converter.md)
-6. [06 - Office 文档转换](./phase-02-document-processing/06-office-document-converter.md)
-7. [07 - Claude Vision API 集成](./phase-02-document-processing/07-claude-vision-integration.md)
-8. [08 - GLM Vision API 集成](./phase-02-document-processing/08-glm-vision-integration.md)
-9. [09 - Markdown 生成优化](./phase-02-document-processing/09-markdown-generation-optimizer.md)
+#### 阶段2：文档处理（参考）
 
-#### **阶段3：知识库管理（2-3天）**
-10. [10 - Knowledge Collection 设计](./phase-03-knowledge-management/10-knowledge-collection-design.md)
-11. [11 - Markdown 存储和索引](./phase-03-knowledge-management/11-markdown-storage-indexing.md)
-12. [12 - 文档元数据管理](./phase-03-knowledge-management/12-document-metadata-manager.md)
+5. [06 - Office 文档转换](./phase-02-document-processing/06-office-document-converter.md)
+6. [07 - Claude Vision API 集成](./phase-02-document-processing/07-claude-vision-integration.md)
+7. [08 - GLM Vision API 集成](./phase-02-document-processing/08-glm-vision-integration.md)
+8. [10 - 后端结构设计](./phase-02-document-processing/10-backend-structure.md)
 
-#### **阶段4：动态加载引擎（3-4天）**
-13. [13 - 用户意图识别模块](./phase-04-dynamic-loading/13-intent-recognition-module.md)
-14. [14 - 知识检索引擎](./phase-04-dynamic-loading/14-knowledge-retrieval-engine.md)
-15. [15 - FastAPI 聊天接口集成](./phase-04-dynamic-loading/15-fastapi-chat-integration.md)
+#### 阶段4：动态加载引擎（Layer 2）
 
-#### **阶段5：测试优化（2-3天）**
-16. [16 - 文档处理功能测试](./phase-05-testing-optimization/16-document-processing-tests.md)
-17. [17 - API 成本优化策略](./phase-05-testing-optimization/17-cost-optimization-strategies.md)
-18. [18 - Svelte 前端开发和工作流](./phase-05-testing-optimization/18-svelte-frontend-development.md)
+9. [13 - 用户意图识别模块](./phase-04-dynamic-loading/13-intent-recognition-module.md)
+10. [14 - 知识检索引擎](./phase-04-dynamic-loading/14-knowledge-retrieval-engine.md)
+11. [15 - FastAPI 聊天接口集成](./phase-04-dynamic-loading/15-fastapi-chat-integration.md)
 
-### 2. 每个文档包含什么？
+#### 阶段5：测试优化
 
-每个提示词文档（约600字）包含：
+12. [16 - 文档处理功能测试](./phase-05-testing-optimization/16-document-processing-tests.md)
+13. [18 - Svelte 前端开发](./phase-05-testing-optimization/18-svelte-frontend-development.md)
 
-- **任务目标**：明确要实现什么
-- **技术要求**：使用的技术栈和工具
-- **实现步骤**：详细的开发指导
-- **关键代码提示**：代码结构建议和示例
-- **测试验证**：如何验证完成
-- **注意事项**：常见坑和最佳实践
-- **依赖关系**：前置和后置任务
+---
 
-### 3. 如何使用这些文档？
+## 技术栈
 
-**方式一：人工开发**
-- 作为开发手册，按顺序完成每个任务
-- 参考代码提示实现功能
-- 使用测试验证确保质量
-
-**方式二：LLM Code Agent**
-- 将文档作为 Prompt 提供给 LLM Code Agent
-- Agent 根据文档自动生成代码
-- 人工审核和测试生成的代码
-
-**方式三：混合模式**
-- 核心模块人工实现
-- 重复性工作交给 Agent
-- 持续迭代优化
-
-## 🔧 技术栈
-
-### 前端框架
+### 前端
 - **SvelteKit**: 现代化前端框架
 - **TypeScript**: 类型安全
 - **Tailwind CSS**: 样式框架
-- **Vite**: 构建工具
 
-### 后端框架
-- **FastAPI**: 高性能后端 API 服务
+### 后端
+- **FastAPI**: 高性能 API 服务
 - **Python 3.11+**: 后端语言
-- **WebSocket**: 实时对话流式传输
+- **WebSocket**: 实时对话
 
 ### AI API
-- **Anthropic Claude**: Vision API（英文文档优势） + Skill 路由
-- **智谱 GLM-4V**: Vision API（中文文档优势，免费）
-
-### 文档处理
-- **pdf2image**: PDF 转图像
-- **PyMuPDF**: PDF 处理
-- **LibreOffice**: Office 文档转换
-- **Pillow**: 图像处理
-
-### Skill 管理
-- **PyYAML**: YAML front matter 解析
-- **JSON**: 轻量级索引
-- **文件系统**: Skill 存储
+- **Claude API**: Vision + 对话
+- **GLM API**: 中文文档处理
+- **Gemini API**: 大上下文窗口
 
 ### Python 工具
 - **uv**: 包管理器
 - **pytest**: 测试框架
 - **pydantic**: 数据验证
 
-## 💡 核心创新点
+---
 
-### 1. 多模态 LLM 文档处理
-- 利用 Claude/GLM 的视觉能力直接处理文档图像
-- 无需传统 OCR，准确率更高
-- 支持复杂排版、表格、公式
+## 相关文档
 
-### 2. Skill-like 动态知识加载
-- 类似 Claude Code Skill 的设计
-- 完整文档注入（不切断上下文）
-- Claude 辅助的智能路由
-- 轻量级实现（无需向量数据库）
+### 架构文档
+- [系统架构](../architecture/SYSTEM_ARCHITECTURE.md) - 分层架构总览
+- [Pipeline 架构](../architecture/PIPELINE_ARCHITECTURE.md) - 文档处理流水线
+- [LLM Provider](../architecture/LLM_PROVIDERS.md) - Provider 系统
 
-### 3. 自动 Skill 组合
-- 基于 YAML metadata 的关联关系
-- 自动加载高优先级相关 Skills
-- 智能控制总 token 消耗
-
-### 4. 成本优化
-- 路由结果缓存（减少重复调用）
-- 模型智能路由（优先免费模型）
-- 简化架构降低维护成本
-
-## 📊 预期效果
-
-### 功能指标
-- ✅ 支持 10+ 种文档格式
-- ✅ 文档处理准确率 > 95%
-- ✅ Skill 路由准确率 > 90%
-- ✅ 端到端响应时间 < 5秒
-
-### 成本指标
-- ✅ 中文文档处理成本接近 $0（使用 GLM-4V-Flash）
-- ✅ 路由缓存命中率 > 50%
-- ✅ 无需向量数据库和 embedding 模型成本
-
-### 用户体验
-- ✅ 文档上传即处理，无需等待
-- ✅ 对话中自动注入相关知识
-- ✅ 完整上下文，不切断语义
-- ✅ 自定义 Svelte Web 界面，交互流畅
-
-## 🎯 里程碑
-
-### MVP（最小可行产品）- 2周
-- 利用仓库中的 `mvp/` CLI（`mvp/README.md`）验证阶段4核心链路：Skill 路由 + 知识注入 + 回答
-- 同步落实阶段 1-3 的准备工作（文档处理、知识生成、索引标准化），为 CLI 提供真实数据
-- 以命令行/后端接口为主，便于快速迭代
-
-### 完整版 - 3周
-- 在现有 CLI 能力基础上完成全部阶段
-- 增加 FastAPI + SvelteKit 前后端（阶段1、4、5）
-- 支持 Skill 动态加载 + UI 协作
-
-### 生产级 - 4周+
-- 性能优化
-- 安全加固
-- 监控告警
-
-## 📝 快速开始
-
-```bash
-# 1. 定位仓库
-cd /Users/woohelps/CascadeProjects/blockme
-
-# 2. 阅读阶段文档，明确任务依赖
-cat docs/llm-agent-prompts/phase-01-environment/01-setup-svelte-frontend.md
-
-# 3. 运行现有 MVP，熟悉 Skill 路由链路
-cd mvp
-uv venv && source .venv/bin/activate
-uv sync
-python main.py  # 详见 mvp/README.md
-
-# 4. 根据文档逐步补齐 frontend/backend 等子项目
-#    完成阶段1-5时再创建 frontend/ backend 目录并运行对应服务
-
-# 5. 每完成一个任务，执行文档中的测试步骤确保质量
-```
-
-> 当前仅有 `mvp/` CLI 可运行；Svelte 前端与 FastAPI 后端会在完成对应阶段后新增。请在任务交付中说明如何将新的后端/前端与 `mvp/` 复用或替换。
-
-## 🤝 贡献指南
-
-如果你在使用这些文档时发现问题或有改进建议：
-
-1. 记录遇到的问题
-2. 提出优化建议
-3. 分享实施经验
-4. 补充最佳实践
-
-## 📄 许可证
-
-本文档集遵循项目许可证。
-
-## 🙏 致谢
-
-感谢以下开源项目和技术：
-- SvelteKit
-- FastAPI
-- Anthropic Claude
-- 智谱 GLM
-- Tailwind CSS
+### 使用指南
+- [快速开始](../guides/QUICK_START.md) - 环境配置和运行
+- [故障排查](../guides/TROUBLESHOOTING.md) - 常见问题
 
 ---
 
-**开始你的知识库系统开发之旅吧！** 🚀
-
-如有问题，请参考各阶段文档的详细说明。
+**维护者**: BeanFlow Team
+**最后更新**: 2025-12-08

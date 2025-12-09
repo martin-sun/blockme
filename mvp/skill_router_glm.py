@@ -1,26 +1,23 @@
 """
-Skill Router - Route relevant Skills using Claude Haiku 4.5
+Skill Router - 使用 GLM API 路由相关 Skills
 """
 import os
 import json
 from typing import List, Dict
-from anthropic import Anthropic
+from zhipuai import ZhipuAI
 
 
-class SkillRouter:
-    """Route Skills using Claude Haiku 4.5"""
+class SkillRouterGLM:
+    """使用 GLM API 路由 Skills"""
 
-    def __init__(self, api_key: str = None, enable_prefilter: bool = False):
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or os.getenv("GLM_API_KEY")
         if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY not found")
+            raise ValueError("未找到 GLM_API_KEY")
 
-        self.client = Anthropic(api_key=self.api_key)
-        # Claude Haiku 4.5 - latest Haiku model
-        self.model = "claude-haiku-4-5-20251001"
-
-        # Prefilter switch (recommended when Skills > 50)
-        self.enable_prefilter = enable_prefilter
+        self.client = ZhipuAI(api_key=self.api_key)
+        # GLM-4-Flash 免费版
+        self.model = "glm-4-flash"
 
     def route(self, user_query: str, available_skills: List[dict]) -> Dict:
         """
@@ -37,27 +34,22 @@ class SkillRouter:
                 "reasoning": "为什么选择这些 Skills 的推理过程"
             }
         """
-        # 可选的第一层：元数据预过滤（仅在 Skill 数量 > 50 且启用时生效）
-        if self.enable_prefilter and len(available_skills) > 50:
-            original_count = len(available_skills)
-            available_skills = self._prefilter_skills(user_query, available_skills)
-            print(f"✂️  预过滤: {original_count} → {len(available_skills)} 个候选 Skills")
-
         prompt = self._build_routing_prompt(user_query, available_skills)
 
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=1024,
                 messages=[
                     {"role": "user", "content": prompt}
-                ]
+                ],
+                max_tokens=1024,
+                temperature=0.1  # 低温度以获得更一致的结果
             )
 
-            result_text = response.content[0].text
+            result_text = response.choices[0].message.content
             result = self._parse_routing_result(result_text)
 
-            print(f"\n🎯 路由结果:")
+            print(f"\n🎯 路由结果 (GLM):")
             print(f"  - 匹配 Skills: {result['matched_skills']}")
             print(f"  - 置信度: {result['confidence']}")
             print(f"  - 推理: {result['reasoning']}\n")
@@ -110,7 +102,7 @@ Return only JSON, no other content."""
         return prompt
 
     def _parse_routing_result(self, result_text: str) -> Dict:
-        """解析 Claude 返回的路由结果"""
+        """解析 GLM 返回的路由结果"""
         try:
             # 提取 JSON（可能被包裹在 ```json ... ``` 中）
             if "```json" in result_text:
@@ -145,78 +137,18 @@ Return only JSON, no other content."""
                 "reasoning": "解析失败"
             }
 
-    def _prefilter_skills(
-        self,
-        user_query: str,
-        all_skills: List[dict],
-        keep_ratio: float = 0.3  # 保留前 30%
-    ) -> List[dict]:
-        """
-        第一层粗筛：用简单规则快速过滤
-
-        只在 Skill 数量 > 50 时启用，减少 Claude API token 消耗
-
-        Args:
-            user_query: 用户问题
-            all_skills: 所有可用 Skills
-            keep_ratio: 至少保留的比例（默认 30%）
-
-        Returns:
-            过滤后的 Skills 列表
-        """
-        scored_skills = []
-        query_lower = user_query.lower()
-
-        for skill in all_skills:
-            score = 0
-
-            # 1. 检查 triggers（触发词） - 最高权重
-            triggers = skill.get('triggers', [])
-            for trigger in triggers:
-                if trigger.lower() in query_lower:
-                    score += 10
-
-            # 2. 检查 keywords - 高权重
-            keywords = skill.get('keywords', [])
-            for keyword in keywords:
-                if keyword.lower() in query_lower:
-                    score += 5
-
-            # 3. 检查 domain - 中权重
-            domain = skill.get('domain', '')
-            if domain and domain.lower() in query_lower:
-                score += 3
-
-            # 4. 检查 tags - 低权重
-            tags = skill.get('tags', [])
-            for tag in tags:
-                if tag.lower() in query_lower:
-                    score += 2
-
-            scored_skills.append((score, skill))
-
-        # 按分数排序
-        scored_skills.sort(reverse=True, key=lambda x: x[0])
-
-        # 保留策略：所有有得分的 + 至少保留 keep_ratio
-        scored_count = len([s for s in scored_skills if s[0] > 0])
-        min_keep = int(len(all_skills) * keep_ratio)
-        keep_count = max(scored_count, min_keep)
-
-        return [skill for score, skill in scored_skills[:keep_count]]
-
 
 if __name__ == "__main__":
     # 测试
     from skill_loader import SkillLoader
 
     loader = SkillLoader("skills")
-    router = SkillRouter()
+    router = SkillRouterGLM()
 
     test_queries = [
-        "萨省的 PST 税率是多少？",
-        "GST 和 PST 有什么区别？",
-        "如何报税？"
+        "What is the T2 Corporation Income Tax Return?",
+        "How do I complete Schedule 500 for Ontario?",
+        "What is the CCUS Investment Tax Credit?"
     ]
 
     for query in test_queries:

@@ -28,11 +28,12 @@ class SkillLoader:
         self.load_all_skills()
 
     def load_all_skills(self):
-        """加载所有 Skill 文件"""
+        """加载所有 Skill 文件（支持扁平文件和目录结构）"""
         if not self.skills_dir.exists():
             print(f"⚠️  Skills 目录不存在: {self.skills_dir}")
             return
 
+        # 1. 加载扁平的 .md 文件（旧格式）
         for file_path in self.skills_dir.glob("*.md"):
             try:
                 skill = self._load_skill_file(file_path)
@@ -40,6 +41,18 @@ class SkillLoader:
                 print(f"✅ 加载 Skill: {skill.skill_id}")
             except Exception as e:
                 print(f"❌ 加载失败 {file_path.name}: {e}")
+
+        # 2. 加载目录结构的 Skills（新格式：skill_id/SKILL.md）
+        for skill_dir in self.skills_dir.iterdir():
+            if skill_dir.is_dir():
+                skill_file = skill_dir / "SKILL.md"
+                if skill_file.exists():
+                    try:
+                        skill = self._load_skill_file(skill_file)
+                        self.skills[skill.skill_id] = skill
+                        print(f"✅ 加载 Skill: {skill.skill_id} (目录结构)")
+                    except Exception as e:
+                        print(f"❌ 加载失败 {skill_dir.name}/SKILL.md: {e}")
 
         print(f"\n📚 共加载 {len(self.skills)} 个 Skills\n")
 

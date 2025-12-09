@@ -1,13 +1,13 @@
 """
-自动化测试脚本 - T2 Corporate Tax 问答测试
+自动化测试脚本 - T2 Corporate Tax 问答测试 (GLM 路由版本)
 
-测试 Stage 5 优化后的 Skill 效果，使用 10 个常见 T2 税务问题。
+使用 GLM API 作为路由器，与 Claude Haiku 版本进行对比。
 """
 import os
 from datetime import datetime
 from pathlib import Path
 from skill_loader import SkillLoader
-from skill_router import SkillRouter
+from skill_router_glm import SkillRouterGLM
 from chat_service import ChatService
 
 
@@ -23,11 +23,12 @@ def load_env():
                     os.environ[key.strip()] = value.strip()
 
 
-def save_results_to_file(results: list, output_path: Path):
+def save_results_to_file(results: list, output_path: Path, router_name: str):
     """保存测试结果到 Markdown 文件"""
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("# T2 Corporate Tax 问答测试结果\n\n")
-        f.write(f"**测试时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(f"# T2 Corporate Tax 问答测试结果 ({router_name} 路由)\n\n")
+        f.write(f"**测试时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"**路由器**: {router_name}\n\n")
         f.write("---\n\n")
 
         for i, result in enumerate(results, 1):
@@ -50,19 +51,15 @@ def save_results_to_file(results: list, output_path: Path):
 
 
 def test_complete_flow():
-    """测试完整流程 - T2 Corporate Tax 问答"""
+    """测试完整流程 - T2 Corporate Tax 问答 (GLM 路由版本)"""
     print("\n" + "="*60)
-    print("  🧪 T2 Corporate Tax 问答测试")
+    print("  🧪 T2 Corporate Tax 问答测试 (GLM 路由)")
     print("="*60 + "\n")
 
     # 加载 .env 文件
     load_env()
 
     # 检查 API Keys
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("❌ 未找到 ANTHROPIC_API_KEY")
-        return False
-
     if not os.getenv("GLM_API_KEY"):
         print("❌ 未找到 GLM_API_KEY")
         return False
@@ -72,7 +69,7 @@ def test_complete_flow():
     # 初始化组件
     print("🚀 初始化组件...")
     skill_loader = SkillLoader("skills")
-    skill_router = SkillRouter()
+    skill_router = SkillRouterGLM()  # 使用 GLM 路由器
     chat_service = ChatService()
     print()
 
@@ -101,8 +98,8 @@ def test_complete_flow():
         print(f"❓ 问题: {query}\n")
 
         try:
-            # Step 1: 路由
-            print("📍 Step 1: 路由相关 Skills...")
+            # Step 1: 路由 (使用 GLM)
+            print("📍 Step 1: 路由相关 Skills (GLM)...")
             routing_result = skill_router.route(
                 query,
                 skill_loader.get_all_skills_metadata()
@@ -163,14 +160,14 @@ def test_complete_flow():
                 "answer": f"错误: {str(e)}"
             })
 
-    # 保存结果到文件
-    output_path = Path(__file__).parent / "test_results.md"
-    save_results_to_file(results, output_path)
+    # 保存结果到文件 (GLM 版本)
+    output_path = Path(__file__).parent / "test_results_glm.md"
+    save_results_to_file(results, output_path, "GLM-4-Flash")
     print(f"\n💾 测试结果已保存到: {output_path}")
 
     # 总结
     print(f"\n\n{'='*60}")
-    print("  📊 测试结果总结")
+    print("  📊 测试结果总结 (GLM 路由)")
     print(f"{'='*60}\n")
 
     total = len(results)

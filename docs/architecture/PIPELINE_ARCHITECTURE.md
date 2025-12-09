@@ -785,8 +785,8 @@ uv run python stage4_enhance_chunks.py --chunks-id abc123 --retry-failed
 
 **1. 快速测试**:
 ```bash
-# 只处理 10 页，跳过 AI
-uv run python generate_skill.py --pdf FILE.pdf --no-ai
+# 只处理 10 页
+uv run python generate_skill.py --pdf FILE.pdf --glm-api
 ```
 
 **2. 调试 Pipeline**:

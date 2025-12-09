@@ -44,11 +44,11 @@ This will:
 - **Gemini**: ~5-10 minutes (1 chunk, 5x larger context window)
 - **Codex**: ~15-20 minutes (3 chunks × 5-7 min/chunk)
 
-### Quick Test (First 5 Pages, No AI)
+### Quick Test (First 5 Pages)
 
 ```bash
 cd backend
-uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --no-ai --max-pages 5
+uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --glm-api --max-pages 5
 ```
 
 ---
@@ -181,7 +181,7 @@ The `generate_skill.py` script provides a convenient way to generate skills from
 | `--local-claude` | Flag | False | Use local Claude Code CLI (requires subscription) |
 | `--local-gemini` | Flag | False | Use local Gemini CLI (free tier: 1000 req/day) |
 | `--local-codex` | Flag | False | Use local Codex CLI (requires OpenAI access) |
-| `--no-ai` | Flag | False | Skip AI enhancement (fastest mode) |
+| `--glm-api` | Flag | False | Use GLM API (requires GLM_API_KEY) |
 | `--api` | Flag | False | Use Claude API (requires ANTHROPIC_API_KEY) |
 | `--max-pages N` | Integer | 10 | Max pages to process when not using --full |
 | `--output-dir PATH` | String | `skills_output` | Output directory for generated skills |
@@ -207,10 +207,10 @@ uv run python generate_skill.py \
   --local-codex \
   --full
 
-# Fast test without AI (first 10 pages)
+# Fast test with GLM API (first 10 pages)
 uv run python generate_skill.py \
   --pdf ../mvp/pdf/t4012-24e.pdf \
-  --no-ai
+  --glm-api
 
 # Custom page range with API enhancement
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -514,7 +514,6 @@ Each LLM provider uses its optimal chunk size based on context window:
 
 **Alternative Options**:
 - Use API mode (1-2 minutes, requires API key and cost)
-- Use `--no-ai` flag (10 seconds, no enhancement)
 - Process specific page ranges with `--max-pages N`
 
 **Recommendation**: For production, consider API mode or selective enhancement

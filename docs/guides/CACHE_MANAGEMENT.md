@@ -437,12 +437,11 @@ rm -rf backend/cache/enhanced_chunks_<hash>/ # 重新增强
 ### 开发期间
 
 1. **保留缓存**: 加速迭代，避免重复处理
-2. **善用 `--no-ai`**: 测试 Stage 1-3 时跳过耗时的 Stage 4
-3. **使用小页数测试**: `--max-pages 10` 快速验证
+2. **使用小页数测试**: `--max-pages 10` 快速验证
 
 ```bash
 # 开发测试命令
-uv run python generate_skill.py --pdf file.pdf --no-ai --max-pages 10
+uv run python generate_skill.py --pdf file.pdf --glm-api --max-pages 10
 ```
 
 ### 生产环境

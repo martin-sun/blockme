@@ -157,7 +157,7 @@ source .venv/bin/activate
 
 uv run python generate_skill.py \
   --pdf ../mvp/pdf/t4012-24e.pdf \
-  --no-ai
+  --glm-api
 ```
 
 **预期输出**:
@@ -329,8 +329,6 @@ skills_output/
 
 | 配置 | 页数 | Stage 1-3 | Stage 4 | 总时间 |
 |------|------|-----------|---------|--------|
-| `--no-ai` | 10 | ~30s | 跳过 | ~30s |
-| `--no-ai --full` | 151 | ~2min | 跳过 | ~2min |
 | `--glm-api` | 10 | ~30s | ~5min | ~6min |
 | `--glm-api --full` | 151 | ~2min | ~3h | ~3h |
 | `--glm-api --full --workers 4` | 151 | ~2min | ~1h | ~1h |
@@ -444,7 +442,7 @@ source ~/.bashrc  # 或 ~/.zshrc
 - [ ] 后端依赖已安装（`uv sync` 成功）
 - [ ] GLM_API_KEY 已配置（Stage 2 必需）
 - [ ] 至少一个 Stage 4 Provider 可用
-- [ ] `--no-ai` 快速测试通过
+- [ ] `--glm-api` 快速测试通过
 
 ---
 

@@ -27,13 +27,13 @@ uv sync
 ### 2. 基本使用
 
 ```bash
-# 快速测试（前 10 页，无 AI 增强）
-uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --no-ai
+# 快速测试（前 10 页）
+uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --glm-api
 
 # 完整处理（所有页面 + AI 增强）
 uv run python generate_skill.py \
   --pdf ../mvp/pdf/t4012-24e.pdf \
-  --glm-claude \
+  --glm-api \
   --full
 
 # 断点续传
@@ -52,9 +52,8 @@ uv run python generate_skill.py \
 | `--pdf PATH` | PDF 文件路径（必需） |
 | `--full` | 处理完整文档 |
 | `--max-pages N` | 只处理前 N 页 |
-| `--no-ai` | 跳过 AI 增强 |
 | `--local-claude` | 使用 Claude Code CLI |
-| `--glm-claude` | 使用 GLM via Claude Code Manager |
+| `--glm-api` | 使用 GLM API |
 | `--enhance-skill` | 增强 SKILL.md（可选） |
 | `--force` | 强制重新处理（忽略缓存） |
 

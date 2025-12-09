@@ -45,7 +45,7 @@ cp .env.example .env
 cd backend
 uv venv .venv && source .venv/bin/activate
 uv sync
-uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --no-ai
+uv run python generate_skill.py --pdf ../mvp/pdf/t4012-24e.pdf --glm-api
 ```
 
 ### 前端

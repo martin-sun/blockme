@@ -122,6 +122,18 @@ def _find_title_with_heading_context(content: str, title: str, search_start: int
     """
     search_content = content[search_start:]
 
+    # Helper class to create a simple match-like object with fixed positions
+    class SimpleMatch:
+        def __init__(self, start_pos: int, end_pos: int):
+            self._start = start_pos
+            self._end = end_pos
+
+        def start(self):
+            return self._start
+
+        def end(self):
+            return self._end
+
     # Strategy 1: Look for markdown heading format (# Title or ## Title)
     heading_pattern = r'(?:^|\n)\s*#{1,3}\s*' + re.escape(title)
     match = re.search(heading_pattern, search_content, re.IGNORECASE)
@@ -129,11 +141,9 @@ def _find_title_with_heading_context(content: str, title: str, search_start: int
         # Adjust position to actual title start (skip the # prefix)
         title_match = re.search(re.escape(title), search_content[match.start():], re.IGNORECASE)
         if title_match:
-            return re.Match.__new__(re.Match) if False else \
-                   type('Match', (), {
-                       'start': lambda: search_start + match.start() + title_match.start(),
-                       'end': lambda: search_start + match.start() + title_match.end()
-                   })()
+            start_pos = search_start + match.start() + title_match.start()
+            end_pos = search_start + match.start() + title_match.end()
+            return SimpleMatch(start_pos, end_pos)
 
     # Strategy 2: Look for title at start of line (after newline)
     line_start_pattern = r'(?:^|\n)\s*' + re.escape(title)
@@ -141,19 +151,17 @@ def _find_title_with_heading_context(content: str, title: str, search_start: int
     if match:
         title_match = re.search(re.escape(title), search_content[match.start():], re.IGNORECASE)
         if title_match:
-            return type('Match', (), {
-                'start': lambda s=search_start, m=match, tm=title_match: s + m.start() + tm.start(),
-                'end': lambda s=search_start, m=match, tm=title_match: s + m.start() + tm.end()
-            })()
+            start_pos = search_start + match.start() + title_match.start()
+            end_pos = search_start + match.start() + title_match.end()
+            return SimpleMatch(start_pos, end_pos)
 
     # Strategy 3: Fallback to simple search
     pattern = re.escape(title)
     match = re.search(pattern, search_content, re.IGNORECASE)
     if match:
-        return type('Match', (), {
-            'start': lambda s=search_start, m=match: s + m.start(),
-            'end': lambda s=search_start, m=match: s + m.end()
-        })()
+        start_pos = search_start + match.start()
+        end_pos = search_start + match.end()
+        return SimpleMatch(start_pos, end_pos)
 
     return None
 

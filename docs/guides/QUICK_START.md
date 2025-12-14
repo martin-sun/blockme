@@ -147,83 +147,93 @@ codex login
 
 ## 第一次运行
 
-### 快速测试（无 AI 增强）
+### 一键运行（推荐）
 
-最快速的测试方式，跳过 AI 增强阶段：
+使用 `run_pipeline.py` 一键运行完整处理流程：
 
 ```bash
 cd backend
 source .venv/bin/activate
 
-uv run python generate_skill.py \
-  --pdf ../mvp/pdf/t4012-24e.pdf \
-  --glm-api
+# 使用 GLM API 处理 PDF（推荐）
+uv run python run_pipeline.py \
+  --pdf ../mvp/pdf/rc4022-24e.pdf \
+  --provider glm-api
+
+# 处理完整文档
+uv run python run_pipeline.py \
+  --pdf ../mvp/pdf/rc4022-24e.pdf \
+  --provider glm-api \
+  --full
+
+# 并行加速（4 个 worker）
+uv run python run_pipeline.py \
+  --pdf ../mvp/pdf/rc4022-24e.pdf \
+  --provider glm-api \
+  --full \
+  --workers 4
 ```
 
 **预期输出**:
 ```
-============================================================
-PDF Document Processing Pipeline
-============================================================
-
-📄 PDF: t4012-24e.pdf
-📁 Output: skills_output
+======================================================================
+BeanFlow-CRA: PDF Processing Pipeline
+======================================================================
+📄 PDF: ../mvp/pdf/rc4022-24e.pdf
+🤖 Provider: glm-api
 📦 Pages: First 10
+📁 Output: skills_output
+👷 Workers: 1
+======================================================================
 
-============================================================
-Stage 1: PDF Extraction
-============================================================
-✅ Extracted 10 pages, 45,230 characters
+🔹 Stage 1/5: PDF Extraction
+   ✅ Extraction ID: abc123def456
 
-============================================================
-Stage 2: Content Classification
-============================================================
-✅ Category: employment_income (confidence: 0.85)
+🔹 Stage 2/5: Content Classification
+   ✅ Category: gst_hst_registrants
 
-============================================================
-Stage 3: Content Chunking
-============================================================
-✅ Created 12 chunks (avg 3,769 chars)
+🔹 Stage 3/5: Content Chunking
+   ✅ Chunks: 15
 
-============================================================
-Stage 5: Generate Skill Directory
-============================================================
-✅ Skill generated: skills_output/employment-income-t4012
+🔹 Stage 4/5: AI Enhancement
+   ✅ Enhancement complete
 
+🔹 Stage 5/5: Generate Skill Directory
+   ✅ Skill: skills_output/gst-hst-registrants-rc4022
+
+======================================================================
 ✅ Pipeline Complete!
+======================================================================
+📁 Skill Directory: skills_output/gst-hst-registrants-rc4022
+⏱️  Total Time: 0:15:32
+======================================================================
 ```
 
-### 完整处理（带 AI 增强）
+### 快速测试（跳过 AI 增强）
 
-使用 GLM API 进行完整处理：
+最快速的测试方式，跳过耗时的 Stage 4：
 
 ```bash
-uv run python generate_skill.py \
-  --pdf ../mvp/pdf/t4012-24e.pdf \
-  --glm-api \
-  --full
+uv run python run_pipeline.py \
+  --pdf ../mvp/pdf/rc4022-24e.pdf \
+  --provider glm-api \
+  --skip-enhance
 ```
 
-**使用其他 Provider**:
+### 使用不同 Provider
 
 ```bash
-# Claude Code CLI
-uv run python generate_skill.py \
-  --pdf ../mvp/pdf/t4012-24e.pdf \
-  --local-claude \
-  --full
+# GLM API（推荐，需要 GLM_API_KEY）
+uv run python run_pipeline.py --pdf file.pdf --provider glm-api
 
-# Gemini CLI
-uv run python generate_skill.py \
-  --pdf ../mvp/pdf/t4012-24e.pdf \
-  --local-gemini \
-  --full
+# Claude Code CLI（需要 claude login）
+uv run python run_pipeline.py --pdf file.pdf --provider claude
 
-# Codex CLI
-uv run python generate_skill.py \
-  --pdf ../mvp/pdf/t4012-24e.pdf \
-  --local-codex \
-  --full
+# Gemini CLI（需要 gemini login）
+uv run python run_pipeline.py --pdf file.pdf --provider gemini
+
+# Codex CLI（需要 codex login）
+uv run python run_pipeline.py --pdf file.pdf --provider codex
 ```
 
 ### 处理部分页面
@@ -232,66 +242,76 @@ uv run python generate_skill.py \
 
 ```bash
 # 处理前 30 页
-uv run python generate_skill.py \
+uv run python run_pipeline.py \
   --pdf ../mvp/pdf/t4012-24e.pdf \
-  --glm-api \
+  --provider glm-api \
   --max-pages 30
 ```
 
-### 并行处理加速
+### 分阶段运行（高级用法）
 
-使用多 worker 加速 AI 增强阶段：
+如需单独运行各阶段（调试或断点续传）：
 
 ```bash
-# 使用 4 个并行 worker
-uv run python generate_skill.py \
-  --pdf ../mvp/pdf/t4012-24e.pdf \
-  --glm-api \
-  --full \
-  --workers 4
+# Stage 1: PDF 提取
+uv run python stage1_extract_pdf.py --pdf ../mvp/pdf/rc4022-24e.pdf --full
+
+# Stage 2: 内容分类（需要指定 provider）
+uv run python stage2_classify_content.py --extraction-id <ID> --provider glm-api
+
+# Stage 3: 内容分块
+uv run python stage3_chunk_content.py --extraction-id <ID>
+
+# Stage 4: AI 增强（需要指定 provider）
+uv run python stage4_enhance_chunks.py --chunks-id <ID> --provider glm-api
+
+# Stage 5: 生成 Skill
+uv run python stage5_generate_skill.py --enhanced-id <ID>
 ```
 
 ---
 
 ## 命令行参数速查
 
-### 基本参数
+### run_pipeline.py 参数
+
+#### 必需参数
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
-| `--pdf PATH` | PDF 文件路径（必需） | `--pdf file.pdf` |
-| `--output-dir DIR` | 输出目录 | `--output-dir output/` |
+| `--pdf PATH` | PDF 文件路径 | `--pdf file.pdf` |
+| `--provider NAME` | LLM provider | `--provider glm-api` |
 
-### 页面控制
+#### 页面控制
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--full` | 处理完整文档 | 否（仅前 10 页） |
 | `--max-pages N` | 最大处理页数 | 10 |
 
-### LLM Provider 选择
+#### LLM Provider 选择
 
-| 参数 | Provider | 说明 |
-|------|----------|------|
-| `--glm-api` | GLM API | 智谱 GLM-4.6 直接 API |
-| `--local-claude` | Claude Code | 本地 Claude CLI |
-| `--local-gemini` | Gemini CLI | 本地 Gemini CLI |
-| `--local-codex` | Codex CLI | 本地 Codex CLI |
+| Provider | 说明 | 环境要求 |
+|----------|------|----------|
+| `glm-api` | 智谱 GLM-4 API（推荐） | GLM_API_KEY |
+| `claude` | Claude Code CLI | claude login |
+| `gemini` | Gemini CLI | gemini login |
+| `codex` | Codex CLI | codex login |
 
-### 增强选项
-
-| 参数 | 说明 |
-|------|------|
-| `--enhance-skill` | 增强 SKILL.md（额外 3-5 分钟） |
-| `--workers N` | 并行 worker 数（1-8） |
-
-### 缓存控制
+#### 处理选项
 
 | 参数 | 说明 |
 |------|------|
-| `--force` | 强制重新处理所有阶段 |
-| `--force-extract` | 强制重新提取 PDF |
+| `--skip-enhance` | 跳过 Stage 4（AI 增强），快速测试 |
+| `--workers N` | 并行 worker 数（1-8，默认 1） |
+
+#### 缓存控制
+
+| 参数 | 说明 |
+|------|------|
+| `--force` | 强制重新处理所有阶段（忽略缓存） |
 | `--cache-dir DIR` | 自定义缓存目录 |
+| `--output-dir DIR` | Skill 输出目录（默认 skills_output） |
 
 ---
 
@@ -346,21 +366,30 @@ skills_output/
 
 ## 断点续传
 
-Stage 4（AI 增强）支持中断后继续：
+Pipeline 支持中断后自动恢复：
 
 ```bash
 # 首次运行（处理到一半中断）
-uv run python generate_skill.py --pdf file.pdf --glm-api --full
+uv run python run_pipeline.py --pdf file.pdf --provider glm-api --full
 # Ctrl+C 中断
 
 # 继续处理（自动从断点恢复）
-uv run python generate_skill.py --pdf file.pdf --glm-api --full
-# 自动检测并从上次中断处继续
+uv run python run_pipeline.py --pdf file.pdf --provider glm-api --full
+# 自动检测缓存并从上次中断处继续
 ```
 
 **查看当前进度**:
 ```bash
 cat backend/cache/enhanced_chunks_*/progress.json | python -m json.tool
+```
+
+**手动恢复 Stage 4**:
+```bash
+# 使用 --resume 从断点继续
+uv run python stage4_enhance_chunks.py --chunks-id <ID> --resume
+
+# 重试失败的 chunks
+uv run python stage4_enhance_chunks.py --chunks-id <ID> --retry-failed
 ```
 
 ---
@@ -440,11 +469,16 @@ source ~/.bashrc  # 或 ~/.zshrc
 - [ ] uv 包管理器已安装
 - [ ] 系统依赖已安装（poppler, mupdf-tools）
 - [ ] 后端依赖已安装（`uv sync` 成功）
-- [ ] GLM_API_KEY 已配置（Stage 2 必需）
-- [ ] 至少一个 Stage 4 Provider 可用
-- [ ] `--glm-api` 快速测试通过
+- [ ] 至少一个 LLM Provider 可用（推荐 GLM_API_KEY）
+- [ ] 快速测试通过：
+  ```bash
+  uv run python run_pipeline.py \
+    --pdf ../mvp/pdf/rc4022-24e.pdf \
+    --provider glm-api \
+    --skip-enhance
+  ```
 
 ---
 
-**版本**: 2.0
-**更新**: 2025-12-08
+**版本**: 3.0
+**更新**: 2025-12-09
